@@ -12,6 +12,7 @@
 }
 body[data-state="listening"] { --accent: var(--amber); }
 body[data-state="thinking"]  { --accent: var(--violet); }
+body[data-state="confirming"] { --accent: var(--amber); }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -125,6 +126,33 @@ input[type="range"] { flex: 1; accent-color: var(--cyan); }
   text-shadow: 0 0 14px rgba(62,242,255,.45);
   max-height: 5.4em; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end;
 }
+
+/* ---------- Confirmación de acciones ---------- */
+.confirm {
+  position: fixed; left: 50%; top: 47%; transform: translate(-50%, -50%); z-index: 5;
+  width: min(460px, calc(100vw - 32px)); padding: 22px 24px;
+  background: rgba(10, 6, 0, .86); border: 1px solid var(--amber);
+  box-shadow: 0 0 40px rgba(255, 181, 71, .25), inset 0 0 30px rgba(255, 181, 71, .08);
+  clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+  backdrop-filter: blur(6px); animation: confirm-in .35s ease-out;
+}
+.confirm[hidden] { display: none; }
+@keyframes confirm-in { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }
+.confirm-head { display: flex; align-items: center; gap: 10px; font: 600 11px 'Orbitron'; letter-spacing: .3em; color: var(--amber); }
+.confirm-icon { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--amber); font-size: 12px; animation: blink 1s infinite; }
+.confirm-title { margin: 14px 0 10px; font-size: 22px; font-weight: 600; color: #fff3df; }
+.confirm-detail {
+  margin: 0; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font: 12px/1.5 'Share Tech Mono', monospace; color: rgba(255, 230, 190, .75);
+  background: rgba(0, 0, 0, .35); padding: 10px 12px; border-left: 2px solid rgba(255, 181, 71, .5);
+}
+.confirm-detail:empty { display: none; }
+.confirm-hint { margin: 14px 0 12px; font: 12px 'Share Tech Mono', monospace; opacity: .8; }
+.confirm-hint b { color: var(--amber); }
+.confirm-actions { display: flex; gap: 10px; }
+.confirm-actions .btn { flex: 1; border-color: rgba(255, 181, 71, .5); color: var(--amber); }
+#confirm-yes { background: var(--amber); color: #120a00; }
+#log li.sys { border-color: var(--violet); font: 12px 'Share Tech Mono', monospace; opacity: .75; }
 
 /* ---------- Barra inferior ---------- */
 .bottom {

@@ -12,7 +12,9 @@
     set(k, v) { try { localStorage.setItem('jarvis.' + k, JSON.stringify(v)); } catch { /* sin storage */ } },
   };
 
-  const STATE_LABEL = { boot: 'INICIANDO', idle: 'EN ESPERA', listening: 'ESCUCHANDO', thinking: 'PROCESANDO', speaking: 'TRANSMITIENDO' };
+  const STATE_LABEL = { boot: 'INICIANDO', idle: 'EN ESPERA', listening: 'ESCUCHANDO', thinking: 'PROCESANDO', speaking: 'TRANSMITIENDO', confirming: 'AUTORIZACIÓN' };
+  // Token que el servidor inyecta en la página; sin él la API rechaza los pedidos.
+  const TOKEN = document.querySelector('meta[name="jarvis-token"]')?.content || '';
 
   const app = {
     state: 'boot',
@@ -23,6 +25,7 @@
     micLevel: 0,      // 0..1, nivel del micrófono
     voicePulse: 0,    // 0..1, envolvente simulada de la voz de salida
     abort: null,
+    confirm: null,    // acción esperando un sí/no: { id, app, action, detail }
   };
 
   function setState(s) {
@@ -59,7 +62,7 @@
   resize();
 
   const COLORS = {
-    boot: [62, 242, 255], idle: [62, 242, 255], listening: [255, 181, 71], thinking: [169, 139, 255], speaking: [120, 250, 255],
+    boot: [62, 242, 255], idle: [62, 242, 255], listening: [255, 181, 71], thinking: [169, 139, 255], speaking: [120, 250, 255], confirming: [255, 150, 40],
   };
   let col = [62, 242, 255];
   let energy = 0;
@@ -75,6 +78,7 @@
     if (app.state === 'listening') e = 0.12 + app.micLevel * 0.9;
     if (app.state === 'thinking') e = 0.25 + Math.sin(time * 8) * 0.06;
     if (app.state === 'speaking') e = 0.18 + app.voicePulse * 0.55 + Math.abs(Math.sin(time * 11)) * 0.08;
+    if (app.state === 'confirming') e = 0.15 + app.micLevel * 0.8 + app.voicePulse * 0.4 + (Math.sin(time * 4) > 0.6 ? 0.12 : 0);
     energy += (e - energy) * 0.18;
     app.voicePulse *= 0.93;
 
@@ -247,7 +251,10 @@
   }
 
   function maybeFinishSpeaking() {
-    if (pendingUtterances > 0 || !streamDone) return;
+    if (pendingUtterances > 0) return;
+    // Terminó de preguntar si autorizás la acción: ahora escucha el sí/no
+    if (app.state === 'confirming') { if (app.confirm) listenForConfirm(); return; }
+    if (!streamDone) return;
     if (app.state === 'speaking' || app.state === 'thinking') {
       setState('idle');
       if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 350);
@@ -268,7 +275,8 @@
   function addLog(who, text) {
     const li = document.createElement('li');
     li.className = who;
-    li.innerHTML = `<b>${who === 'user' ? 'VOS' : 'J.A.R.V.I.S.'} · ${new Date().toLocaleTimeString('es-AR', { hour12: false })}</b>`;
+    const label = who === 'user' ? 'VOS' : who === 'sys' ? 'SISTEMA' : 'J.A.R.V.I.S.';
+    li.innerHTML = `<b>${label} · ${new Date().toLocaleTimeString('es-AR', { hour12: false })}</b>`;
     const span = document.createElement('span');
     span.textContent = text;
     li.appendChild(span);
@@ -312,10 +320,11 @@
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
         body: JSON.stringify({ text, sessionId: app.sessionId }),
         signal: controller.signal,
       });
+      if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok || !res.body) throw new Error('El servidor respondió ' + res.status);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -339,6 +348,11 @@
             $('sub-ai').textContent = full;
             aiSpan.textContent = full;
             flushSentences(false);
+          } else if (ev === 'tool') {
+            $('t-action').textContent = data.app.toUpperCase();
+          } else if (ev === 'confirm') {
+            flushSentences(true); // primero termina de decir qué va a hacer
+            showConfirm(data);
           } else if (ev === 'done') {
             app.sessionId = data.sessionId; store.set('sessionId', app.sessionId);
             app.turns++; updateTelemetry();
@@ -367,10 +381,79 @@
   }
 
   function interrupt() {
-    if (app.abort) { app.abort.abort(); app.abort = null; }
+    if (app.abort) { app.abort.abort(); app.abort = null; } // el servidor deniega lo pendiente al cortarse
+    closeConfirm();
     stopSpeaking();
     streamDone = true;
   }
+
+  // ============================================================
+  //  CONFIRMACIÓN DE ACCIONES (cada herramienta espera un sí/no)
+  // ============================================================
+  function showConfirm(data) {
+    app.confirm = data;
+    $('confirm-title').textContent = data.title || (data.action ? `${data.app} · ${data.action}` : data.app);
+    $('confirm-detail').textContent = data.detail || '';
+    $('confirm').hidden = false;
+    $('t-action').textContent = 'ESPERANDO OK';
+    addLog('sys', `Pide autorización: ${data.app}${data.action ? ' · ' + data.action : ''}`);
+    setState('confirming');
+    speak(`¿Me autorizás a usar ${data.app}?`);
+  }
+
+  function closeConfirm() {
+    app.confirm = null;
+    $('confirm').hidden = true;
+    if (rec && app.state === 'confirming') rec.abort();
+  }
+
+  function answerConfirm(allow) {
+    if (!app.confirm) return;
+    const { id } = app.confirm;
+    closeConfirm();
+    stopSpeaking();
+    addLog('sys', allow ? 'Autorizado.' : 'Rechazado.');
+    $('t-action').textContent = allow ? 'EJECUTANDO' : 'CANCELADA';
+    setState('thinking');
+    fetch('/api/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
+      body: JSON.stringify({ id, allow }),
+    }).catch((e) => console.error('No pude enviar la confirmación', e));
+  }
+
+  // Devuelve true (sí), false (no) o null (no se entendió). Gana la primera palabra clave dicha.
+  function parseYesNo(text) {
+    const t = ' ' + text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ') + ' ';
+    const find = (words) => Math.min(...words.map((w) => { const i = t.indexOf(' ' + w + ' '); return i < 0 ? Infinity : i; }));
+    const yes = find(['si', 'dale', 'confirmo', 'confirmar', 'confirmado', 'ok', 'okey', 'okay', 'claro', 'adelante', 'hacelo', 'de una', 'afirmativo', 'perfecto', 'listo', 'autorizo', 'autorizado', 'yes']);
+    const no = find(['no', 'cancela', 'cancelar', 'cancelalo', 'negativo', 'para', 'frena', 'nada', 'nope']);
+    if (yes === Infinity && no === Infinity) return null;
+    return yes < no;
+  }
+
+  function listenForConfirm() {
+    if (!SR || !app.micOn || rec || !app.confirm) return;
+    ensureMicMeter();
+    let said = '';
+    rec = new SR();
+    rec.lang = 'es-AR';
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.onresult = (e) => { said = Array.from(e.results).map((r) => r[0].transcript).join(' '); $('sub-user').textContent = said; };
+    rec.onend = () => {
+      rec = null;
+      if (!app.confirm) return;
+      const v = said ? parseYesNo(said) : null;
+      if (v !== null) answerConfirm(v);
+      else if (said) speak('No te entendí. Decí sí o no.'); // al terminar de hablar vuelve a escuchar
+      else setTimeout(listenForConfirm, 250);
+    };
+    try { rec.start(); } catch { rec = null; }
+  }
+
+  $('confirm-yes').addEventListener('click', () => answerConfirm(true));
+  $('confirm-no').addEventListener('click', () => answerConfirm(false));
 
   // ============================================================
   //  VOZ DE ENTRADA (SpeechRecognition) + nivel de micrófono
@@ -394,7 +477,7 @@
         let sum = 0;
         for (const v of data) { const d = (v - 128) / 128; sum += d * d; }
         const rms = Math.sqrt(sum / data.length);
-        app.micLevel = app.state === 'listening' ? Math.min(1, rms * 6) : 0;
+        app.micLevel = app.state === 'listening' || (app.state === 'confirming' && rec) ? Math.min(1, rms * 6) : 0;
         requestAnimationFrame(loop);
       })();
     } catch (e) {
@@ -448,6 +531,7 @@
 
   function toggleMic() {
     app.micOn = !app.micOn; store.set('micOn', app.micOn); syncButtons();
+    if (app.state === 'confirming') { if (app.micOn) listenForConfirm(); else if (rec) rec.abort(); return; }
     if (app.micOn && app.state === 'idle') startListening();
     if (!app.micOn && rec) { rec.abort(); setState('idle'); }
   }
@@ -503,6 +587,7 @@
     e.preventDefault();
     const v = $('text-input').value; $('text-input').value = '';
     $('text-input').blur();
+    if (app.confirm) { const yn = parseYesNo(v); if (yn !== null) { answerConfirm(yn); return; } }
     ask(v);
   });
 

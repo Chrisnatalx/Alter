@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="jarvis-token" content="__JARVIS_TOKEN__">
   <title>J.A.R.V.I.S.</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -58,6 +59,7 @@
       <dt>SESIÓN</dt><dd id="t-session">NUEVA</dd>
       <dt>LATENCIA</dt><dd id="t-latency">— ms</dd>
       <dt>TURNOS</dt><dd id="t-turns">0</dd>
+      <dt>ACCIÓN</dt><dd id="t-action">—</dd>
       <dt>SEÑAL</dt><dd><div class="meter"><i id="t-meter"></i></div></dd>
     </dl>
     <div class="panel-title"><span></span>VOZ</div>
@@ -70,6 +72,18 @@
     <div class="panel-title"><span></span>REGISTRO <button id="log-toggle" class="btn mini">—</button></div>
     <ol id="log"></ol>
   </aside>
+
+  <!-- Confirmación de acciones: aparece cada vez que JARVIS quiere usar una herramienta -->
+  <section id="confirm" class="confirm" hidden role="alertdialog" aria-labelledby="confirm-title">
+    <div class="confirm-head"><span class="confirm-icon">!</span>AUTORIZACIÓN REQUERIDA</div>
+    <div id="confirm-title" class="confirm-title"></div>
+    <pre id="confirm-detail" class="confirm-detail"></pre>
+    <div class="confirm-hint">Decí <b>«sí»</b> o <b>«no»</b></div>
+    <div class="confirm-actions">
+      <button id="confirm-yes" class="btn">SÍ · CONFIRMAR</button>
+      <button id="confirm-no" class="btn">NO · CANCELAR</button>
+    </div>
+  </section>
 
   <section class="subtitles">
     <div id="sub-user" class="sub user"></div>

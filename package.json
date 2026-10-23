@@ -1,0 +1,16 @@
+{
+  "name": "jarvis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interfaz de voz futurista para conversar con Claude usando tu suscripción (vía Claude Code).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "jarvis": "bin/jarvis.js"
+  }
+}

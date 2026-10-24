@@ -1,7 +1,8 @@
 // J.A.R.V.I.S. — lógica del cliente.
 // Estados: boot → idle ⇄ listening → thinking → speaking → idle.
 // Voz de entrada: Web Speech API (SpeechRecognition). Voz de salida: speechSynthesis.
-// El texto de Claude llega en streaming por SSE desde /api/chat y se va leyendo por oraciones.
+// El texto de Claude llega por el canal de eventos permanente (SSE en /api/events) y se va leyendo por oraciones;
+// los mensajes, interrupciones y confirmaciones salen por POST.
 
 (() => {
   'use strict';
@@ -27,14 +28,18 @@
     muted: store.get('muted', false),
     micLevel: 0,      // 0..1, nivel del micrófono
     voicePulse: 0,    // 0..1, envolvente simulada de la voz de salida
-    abort: null,
     confirm: null,    // acción esperando un sí/no: { id, app, action, detail }
+    replaced: false,  // otra ventana tomó el canal: esta queda inerte
   };
 
   function setState(s) {
     app.state = s;
     document.body.dataset.state = s;
     $('state-label').textContent = STATE_LABEL[s] || s.toUpperCase();
+    // Si una tarea terminó mientras JARVIS estaba ocupado, su resultado se dice ahora que queda libre
+    if (s === 'idle' && taskQueue.length) {
+      setTimeout(() => { if (taskQueue.length && canSayTask()) sayTaskTurn(taskQueue.shift()); }, 0);
+    }
   }
 
   // ============================================================
@@ -274,7 +279,7 @@
   setInterval(() => { if (synth && synth.speaking && !synth.paused) { synth.pause(); synth.resume(); } }, 12000);
 
   // ============================================================
-  //  CONVERSACIÓN CON CLAUDE (SSE sobre fetch)
+  //  CONVERSACIÓN CON CLAUDE (canal de eventos + POST)
   // ============================================================
   function addLog(who, text) {
     const li = document.createElement('li');
@@ -289,116 +294,258 @@
     return span;
   }
 
+  const post = (url, body = {}) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
+    body: JSON.stringify(body),
+  });
+
+  // Turno de la persona en curso: { aiSpan, full, speakBuf, t0, firstToken }. null si no hay ninguno.
+  let cur = null;
+  let userBusy = false;    // el servidor está respondiendo a la persona (interrumpible)
+  let turnOrigin = 'user'; // quién arrancó el turno que está llegando por el canal
+  let staleTurn = false;   // tras interrumpir se ignora lo que llegue hasta que empiece un turno nuevo
+  let taskBuffer = '';     // texto de un turno de tarea: se acumula y se dice entero al terminar
+  const taskQueue = [];    // resultados de tareas esperando a que JARVIS esté libre
+
   async function ask(text) {
     text = text.trim();
     if (!text) { setState('idle'); return; }
-    interrupt();
+    if (app.replaced) return;
+    const stale = interrupt();
     spoken = new Set();
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
     addLog('user', text);
-    const aiSpan = addLog('ai', '…');
+    cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
+    userBusy = true;
     setState('thinking');
     $('t-link').textContent = 'TRANSMITIENDO';
-
-    const controller = new AbortController();
-    app.abort = controller;
     streamDone = false;
-    let full = '';
-    let speakBuf = '';
-    const t0 = performance.now();
-    let firstToken = true;
     // La primera respuesta continúa el saludo de arranque en vez de saludar de nuevo
     const greetContext = app.greetPending ? `[Al iniciar ya le dijiste: «${GREETING}». Esta es su respuesta.]\n` : '';
     app.greetPending = false;
 
-    const flushSentences = (force) => {
-      // Lee por oraciones completas para que la voz empiece rápido y suene natural
-      const re = /[^.!?¿¡…\n]*[.!?…\n]+["')\]]*\s*/g;
-      let m, last = 0;
-      while ((m = re.exec(speakBuf)) !== null) {
-        if (m[0].trim().length > 1) speak(m[0]);
-        last = re.lastIndex;
-        if (m.index === re.lastIndex) re.lastIndex++;
-      }
-      speakBuf = speakBuf.slice(last);
-      if (force && speakBuf.trim()) { speak(speakBuf); speakBuf = ''; }
-    };
-
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
-        body: JSON.stringify({ text: greetContext + text, sessionId: app.sessionId }),
-        signal: controller.signal,
-      });
+      if (stale) await stale; // que el corte llegue al servidor antes que el mensaje nuevo
+      const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
-      if (!res.ok || !res.body) throw new Error('El servidor respondió ' + res.status);
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) >= 0) {
-          const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
-          const ev = /^event: (.+)$/m.exec(raw)?.[1];
-          const dataLine = /^data: (.+)$/m.exec(raw)?.[1];
-          if (!ev || !dataLine) continue;
-          const data = JSON.parse(dataLine);
-          if (ev === 'init') {
-            $('t-model').textContent = (data.model || '—').replace(/^claude-/, '').toUpperCase();
-          } else if (ev === 'delta') {
-            if (firstToken) { firstToken = false; $('t-latency').textContent = Math.round(performance.now() - t0) + ' ms'; }
-            full += data.text; speakBuf += data.text;
-            $('sub-ai').textContent = full;
-            aiSpan.textContent = full;
-            flushSentences(false);
-          } else if (ev === 'tool') {
-            $('t-action').textContent = data.app.toUpperCase();
-          } else if (ev === 'open') {
-            addLog('sys', 'Abrí: ' + data.url);
-          } else if (ev === 'music') {
-            // Con música sonando el micrófono la tomaría como si fueras vos: se apaga hasta que toques ESPACIO.
-            if (app.micOn) toggleMic();
-            addLog('sys', `Música: ${data.title || 'YouTube'}. Micrófono apagado, ESPACIO para volver a hablarme.`);
-          } else if (ev === 'confirm') {
-            flushSentences(true); // primero termina de decir qué va a hacer
-            showConfirm(data);
-          } else if (ev === 'done') {
-            app.sessionId = data.sessionId; store.set('sessionId', app.sessionId);
-            app.turns++; updateTelemetry();
-          } else if (ev === 'error') {
-            throw new Error(data.message);
-          }
-        }
-      }
-      flushSentences(true);
-      $('t-link').textContent = 'ESTABLE';
+      if (!res.ok) throw new Error('El servidor respondió ' + res.status);
     } catch (err) {
-      if (err.name === 'AbortError') return;
-      console.error(err);
-      const msg = /logged in|login/i.test(err.message)
-        ? 'No hay sesión de Claude iniciada. Abrí una terminal, corré claude y hacé login.'
-        : 'Perdí el enlace con el núcleo. ' + err.message;
-      $('sub-ai').textContent = msg;
-      aiSpan.textContent = msg;
-      $('t-link').textContent = 'FALLA';
-      speak('Perdí el enlace con el núcleo.');
-    } finally {
-      if (app.abort === controller) app.abort = null;
-      streamDone = true;
-      maybeFinishSpeaking();
+      failTurn(err.message);
     }
   }
 
+  // Lee por oraciones completas para que la voz empiece rápido y suene natural
+  function flushSentences(force) {
+    if (!cur) return;
+    const re = /[^.!?¿¡…\n]*[.!?…\n]+["')\]]*\s*/g;
+    let m, last = 0;
+    while ((m = re.exec(cur.speakBuf)) !== null) {
+      if (m[0].trim().length > 1) speak(m[0]);
+      last = re.lastIndex;
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+    cur.speakBuf = cur.speakBuf.slice(last);
+    if (force && cur.speakBuf.trim()) { speak(cur.speakBuf); cur.speakBuf = ''; }
+  }
+
+  // El turno de la persona no pudo completarse (error del servidor o enlace caído)
+  function failTurn(message) {
+    console.error(message);
+    const msg = /logged in|login/i.test(message)
+      ? 'No hay sesión de Claude iniciada. Abrí una terminal, corré claude y hacé login.'
+      : 'Perdí el enlace con el núcleo. ' + message;
+    $('sub-ai').textContent = msg;
+    if (cur) cur.aiSpan.textContent = msg; else addLog('sys', msg);
+    $('t-link').textContent = 'FALLA';
+    const hadTurn = !!cur;
+    cur = null; userBusy = false; streamDone = true;
+    if (hadTurn) speak('Perdí el enlace con el núcleo.');
+    maybeFinishSpeaking();
+  }
+
+  // Terminó un turno de tarea sin una respuesta a la persona en curso: si quedó en 'procesando' (p. ej. tras una
+  // confirmación) vuelve a espera, y eso también reparte lo que haya en la cola de tareas.
+  function endIdleTurn() {
+    if (cur || app.state !== 'thinking') return;
+    streamDone = true;
+    maybeFinishSpeaking();
+  }
+
+  // Corta la voz local y, si el servidor está respondiendo, también esa respuesta.
+  // Devuelve la promesa del POST (o null) para que ask() espere antes de mandar lo nuevo.
   function interrupt() {
-    if (app.abort) { app.abort.abort(); app.abort = null; } // el servidor deniega lo pendiente al cortarse
+    let sent = null;
+    if (userBusy && turnOrigin !== 'task') { // un turno de tarea en segundo plano no se corta al hablar
+      staleTurn = true;
+      sent = post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
+    }
+    cur = null; userBusy = false;
     closeConfirm();
     stopSpeaking();
     streamDone = true;
+    return sent;
+  }
+
+  // ------------------------------------------------------------
+  //  Turnos de tareas: lo que Claude dice por su cuenta (terminó una tarea) se dice cuando hay silencio
+  // ------------------------------------------------------------
+  const canSayTask = () => !app.replaced && (app.state === 'idle' || (app.state === 'listening' && !heard));
+
+  function queueTaskTurn(text) {
+    text = text.trim();
+    if (!text) return;
+    if (canSayTask()) sayTaskTurn(text); else taskQueue.push(text);
+  }
+
+  function sayTaskTurn(text) {
+    // Cortar la escucha mientras habla: si no, el micrófono capta su propia voz como si fuera tuya
+    setState('speaking');
+    dropRec();
+    streamDone = true;
+    spoken = new Set();
+    $('sub-ai').textContent = text;
+    addLog('ai', text);
+    speak(text);
+  }
+
+  // ------------------------------------------------------------
+  //  Canal de eventos permanente (fetch en streaming: EventSource no puede mandar el token)
+  // ------------------------------------------------------------
+  function onEvent(ev, data) {
+    switch (ev) {
+      case 'turn':
+        staleTurn = false;
+        turnOrigin = data.origin;
+        if (data.origin === 'task') { taskBuffer = ''; break; }
+        if (!cur) { // turno de la persona sin un ask pendiente: se trata como una respuesta normal
+          dropRec();
+          spoken = new Set();
+          $('sub-ai').textContent = '';
+          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
+          userBusy = true; streamDone = false;
+          setState('thinking');
+          $('t-link').textContent = 'TRANSMITIENDO';
+        }
+        break;
+      case 'init': // el servidor lo repite en cada turno
+        $('t-model').textContent = (data.model || '—').replace(/^claude-/, '').toUpperCase();
+        if (data.sessionId) { app.sessionId = data.sessionId; store.set('sessionId', app.sessionId); updateTelemetry(); }
+        break;
+      case 'delta':
+        if (staleTurn) break;
+        if (turnOrigin === 'task') { taskBuffer += data.text; break; }
+        if (!cur) break;
+        if (cur.firstToken) { cur.firstToken = false; $('t-latency').textContent = Math.round(performance.now() - cur.t0) + ' ms'; }
+        cur.full += data.text; cur.speakBuf += data.text;
+        $('sub-ai').textContent = cur.full;
+        cur.aiSpan.textContent = cur.full;
+        flushSentences(false);
+        break;
+      case 'tool':
+        if (!staleTurn) $('t-action').textContent = data.app.toUpperCase();
+        break;
+      case 'open':
+        addLog('sys', 'Abrí: ' + data.url);
+        break;
+      case 'music':
+        // Con música sonando el micrófono la tomaría como si fueras vos: se apaga hasta que toques ESPACIO.
+        if (app.micOn) toggleMic();
+        addLog('sys', `Música: ${data.title || 'YouTube'}. Micrófono apagado, ESPACIO para volver a hablarme.`);
+        break;
+      case 'confirm':
+        if (staleTurn) break;
+        flushSentences(true); // primero termina de decir qué va a hacer
+        showConfirm(data);
+        break;
+      case 'task':
+        addLog('sys', data.status === 'running'
+          ? 'Tarea en segundo plano: ' + (data.description || data.id)
+          : `Tarea ${data.status}${data.summary ? ': ' + data.summary : ''}`);
+        break;
+      case 'tasks':
+        $('t-tasks').textContent = (data.tasks || []).length;
+        break;
+      case 'done':
+        if (data.sessionId) { app.sessionId = data.sessionId; store.set('sessionId', app.sessionId); }
+        if (staleTurn) { updateTelemetry(); break; } // cierre del turno que se interrumpió
+        if (turnOrigin === 'task') { const t = taskBuffer; taskBuffer = ''; turnOrigin = 'user'; queueTaskTurn(t); endIdleTurn(); break; }
+        flushSentences(true);
+        if (!data.interrupted) app.turns++;
+        updateTelemetry();
+        $('t-link').textContent = 'ESTABLE';
+        cur = null; userBusy = false; streamDone = true;
+        maybeFinishSpeaking();
+        break;
+      case 'error':
+        if (staleTurn) break;
+        if (turnOrigin === 'task') { taskBuffer = ''; turnOrigin = 'user'; addLog('sys', 'Error en una tarea: ' + data.message); endIdleTurn(); break; }
+        failTurn(data.message);
+        break;
+      case 'replaced': // otra ventana tomó el canal: esta se calla y no reconecta
+        app.replaced = true; taskQueue.length = 0;
+        dropRec(); closeConfirm(); stopSpeaking();
+        cur = null; userBusy = false; streamDone = true;
+        $('replaced').hidden = false;
+        $('t-link').textContent = 'CEDIDO';
+        setState('idle');
+        break;
+      case 'reset':
+        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0;
+        closeConfirm(); stopSpeaking();
+        app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
+        $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
+        setState('idle');
+        speak('Memoria reiniciada. Empecemos de cero.', true);
+        break;
+    }
+  }
+
+  // Lee el stream SSE (`event:` + `data:` separados por línea en blanco; los `: ping` se ignoran)
+  async function readEvents(res) {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const ev = /^event: (.+)$/m.exec(raw)?.[1];
+        const dataLine = /^data: (.+)$/m.exec(raw)?.[1];
+        if (!ev || !dataLine) continue;
+        try { onEvent(ev, JSON.parse(dataLine)); } catch (e) { console.error('Evento con falla:', ev, e); }
+      }
+    }
+  }
+
+  async function connectEvents() {
+    let fails = 0;
+    while (!app.replaced) {
+      try {
+        const res = await fetch('/api/events', { headers: { 'X-Jarvis-Token': TOKEN } });
+        if (res.status === 403) {
+          const msg = 'El servidor se reinició: recargá la página con F5.';
+          $('sub-ai').textContent = msg; addLog('sys', msg); $('t-link').textContent = 'FALLA';
+          return; // con otro token no tiene sentido reintentar
+        }
+        if (!res.ok || !res.body) throw new Error('El servidor respondió ' + res.status);
+        fails = 0;
+        $('t-link').textContent = 'ESTABLE';
+        await readEvents(res);
+      } catch (err) {
+        console.warn('Canal de eventos:', err.message);
+      }
+      if (app.replaced) return;
+      // Se cortó: si había un turno en curso no va a llegar su final
+      if (cur || userBusy) failTurn('Se cortó el canal con el servidor.');
+      $('t-link').textContent = 'RECONECTANDO';
+      staleTurn = false;
+      await new Promise((r) => setTimeout(r, Math.min(10000, 1000 * 2 ** fails++))); // 1, 2, 4, 8, 10 s
+    }
   }
 
   // ============================================================
@@ -411,9 +558,9 @@
     $('confirm').hidden = false;
     $('t-action').textContent = 'ESPERANDO OK';
     addLog('sys', `Pide autorización: ${data.app}${data.action ? ' · ' + data.action : ''}`);
-    stopBargeIn(); // la escucha del sí/no arranca sola cuando termina la pregunta
+    dropRec(); // la escucha del sí/no arranca sola cuando termina la pregunta
     setState('confirming');
-    speak(`¿Me autorizás a usar ${data.app}?`);
+    speak(data.speech || `¿Me autorizás a usar ${data.app}?`);
   }
 
   function closeConfirm() {
@@ -428,13 +575,14 @@
     closeConfirm();
     stopSpeaking();
     addLog('sys', allow ? 'Autorizado.' : 'Rechazado.');
+    if (id === 'reset') { // confirmación local de NUEVA: no pasa por /api/confirm
+      if (allow) post('/api/new', { force: true }).catch((e) => console.error('No pude reiniciar', e));
+      else { setState('idle'); if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 350); }
+      return;
+    }
     $('t-action').textContent = allow ? 'EJECUTANDO' : 'CANCELADA';
     setState('thinking');
-    fetch('/api/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
-      body: JSON.stringify({ id, allow }),
-    }).catch((e) => console.error('No pude enviar la confirmación', e));
+    post('/api/confirm', { id, allow }).catch((e) => console.error('No pude enviar la confirmación', e));
   }
 
   // Devuelve true (sí), false (no) o null (no se entendió). Si la frase trae un sí y un no
@@ -449,7 +597,7 @@
   }
 
   function listenForConfirm() {
-    if (!SR || !app.micOn || rec || !app.confirm) return;
+    if (!SR || !app.micOn || app.replaced || rec || !app.confirm) return;
     ensureMicMeter();
     let said = '';
     rec = new SR();
@@ -503,6 +651,7 @@
   }
 
   function startListening() {
+    if (app.replaced) return;
     if (!SR) { $('sub-ai').textContent = 'Este navegador no soporta reconocimiento de voz. Usá Chrome o Edge, o escribí abajo.'; return; }
     if (app.state === 'listening') return;
     stopBargeIn();
@@ -564,7 +713,7 @@
   function dbg(msg) { if (DEBUG) { console.log('[mic]', msg); addLog('sys', '[mic] ' + msg); } }
 
   function startBargeIn() {
-    if (!SR || !app.micOn || rec || app.state !== 'speaking') return;
+    if (!SR || !app.micOn || app.replaced || rec || app.state !== 'speaking') return;
     let cut = false;
     heard = '';
     const r = rec = new SR();
@@ -611,6 +760,14 @@
     r.abort();
   }
 
+  // Corta cualquier escucha en curso sin que dispare sus callbacks (otra cosa toma el micrófono)
+  function dropRec() {
+    if (!rec) return;
+    const r = rec; rec = null;
+    r.onend = null; r.onresult = null;
+    r.abort();
+  }
+
   function toggleMic() {
     app.micOn = !app.micOn; store.set('micOn', app.micOn); syncButtons();
     if (app.state === 'confirming') { if (app.micOn) listenForConfirm(); else if (rec) rec.abort(); return; }
@@ -628,7 +785,7 @@
   addEventListener('keydown', (e) => {
     if (e.code !== 'Escape') return;
     interrupt(); if (rec) rec.abort(); setState('idle');
-    if (app.micOn) setTimeout(startListening, 300);
+    if (app.micOn) setTimeout(() => { if (app.state === 'idle') startListening(); }, 300); // si habló una tarea, no se la corta
   });
 
   // Tocar el núcleo mientras JARVIS habla lo interrumpe y vuelve a escucharte.
@@ -657,13 +814,31 @@
     app.muted = !app.muted; store.set('muted', app.muted); syncButtons();
     if (app.muted) { stopSpeaking(); maybeFinishSpeaking(); }
   });
+  // NUEVA: el servidor cierra la sesión y avisa con `reset` (ahí se limpia la pantalla).
+  // Si hay tareas en curso pide confirmar con el mismo panel y la misma escucha de sí/no.
+  async function newConversation() {
+    const stale = interrupt();
+    try {
+      if (stale) await stale;
+      const res = await post('/api/new');
+      if (res.status === 409) {
+        const { running } = await res.json();
+        dropRec();
+        showConfirm({
+          id: 'reset', app: 'NUEVA', action: '',
+          title: `Hay ${running} ${running === 1 ? 'tarea' : 'tareas'} en curso y se van a cancelar`,
+          detail: '',
+          speech: `Hay ${running} ${running === 1 ? 'tarea' : 'tareas'} en curso y se van a cancelar. ¿Confirmás?`,
+        });
+      } else if (!res.ok) throw new Error('El servidor respondió ' + res.status);
+    } catch (err) {
+      console.error('No pude reiniciar la conversación', err);
+      addLog('sys', 'No pude reiniciar la conversación: ' + err.message);
+    }
+  }
   $('reset-btn').addEventListener('click', (e) => {
     e.currentTarget.blur();
-    interrupt();
-    app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
-    $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
-    setState('idle');
-    speak('Memoria reiniciada. Empecemos de cero.', true);
+    newConversation();
   });
   $('log-toggle').addEventListener('click', () => $('log-panel').classList.toggle('collapsed'));
   $('text-form').addEventListener('submit', (e) => {
@@ -690,6 +865,7 @@
 
   async function boot() {
     syncButtons(); updateTelemetry();
+    connectEvents();
     // ?skip salta la animación (útil al recargar); el audio se habilita con el primer clic o tecla
     if (new URLSearchParams(location.search).has('skip')) { setState('idle'); if (app.micOn) startListening(); return; }
     const log = $('boot-log');

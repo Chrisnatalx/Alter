@@ -154,6 +154,13 @@ input[type="range"] { flex: 1; accent-color: var(--cyan); }
 #confirm-yes { background: var(--amber); color: #120a00; }
 #log li.sys { border-color: var(--violet); font: 12px 'Share Tech Mono', monospace; opacity: .75; }
 
+/* Aviso de «abierto en otra ventana»: tapa la interfaz, que queda inactiva */
+.replaced {
+  position: fixed; inset: 0; z-index: 8; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 0 16px; text-align: center; background: rgba(4, 2, 0, .88); backdrop-filter: blur(6px);
+}
+.replaced[hidden] { display: none; }
+
 /* ---------- Barra inferior ---------- */
 .bottom {
   position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 230px 1fr auto;

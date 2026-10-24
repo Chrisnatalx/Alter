@@ -61,6 +61,7 @@
       <dt>LATENCIA</dt><dd id="t-latency">— ms</dd>
       <dt>TURNOS</dt><dd id="t-turns">0</dd>
       <dt>ACCIÓN</dt><dd id="t-action">—</dd>
+      <dt>TAREAS</dt><dd id="t-tasks">0</dd>
       <dt>SEÑAL</dt><dd><div class="meter"><i id="t-meter"></i></div></dd>
     </dl>
     <div class="panel-title"><span></span>VOZ</div>
@@ -84,6 +85,13 @@
       <button id="confirm-yes" class="btn">SÍ · CONFIRMAR</button>
       <button id="confirm-no" class="btn">NO · CANCELAR</button>
     </div>
+  </section>
+
+  <!-- Aviso cuando otra ventana de JARVIS tomó el canal de eventos: esta queda inactiva -->
+  <section id="replaced" class="replaced" hidden role="alertdialog" aria-labelledby="replaced-title">
+    <div class="confirm-head"><span class="confirm-icon">!</span>ENLACE CEDIDO</div>
+    <div id="replaced-title" class="confirm-title">JARVIS está abierto en otra ventana</div>
+    <div class="confirm-hint">Cerrá esta pestaña, o recargá (F5) para traer a JARVIS de vuelta acá.</div>
   </section>
 
   <section class="subtitles">

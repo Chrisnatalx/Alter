@@ -55,7 +55,9 @@ Levanta el servidor y abre la interfaz. Si ya estaba corriendo, solo abre la ven
 - **ESPACIO** o botón **MICRÓFONO**: prende/apaga la escucha.
 - **ESC**, o tocar el núcleo mientras habla: interrumpe la respuesta y vuelve a escucharte.
 - **Interrumpir hablando**: mientras JARVIS habla sigue escuchando. Ignora las palabras que él mismo está diciendo (el micrófono también capta los parlantes) y corta cuando oye 3 palabras nuevas o una orden como «basta», «callate», «esperá» o «Jarvis». Con auriculares funciona mejor.
-- **NUEVA**: empieza una conversación sin contexto previo.
+- **NUEVA**: empieza una conversación sin contexto previo. Si hay tareas en segundo plano, te avisa cuántas se cancelarían y espera tu «sí» o «no».
+- **Una sola ventana**: la página escucha a JARVIS por un canal de eventos permanente (`/api/events`) y le manda lo que decís por POST. Hay una única sesión viva con Claude, y solo una ventana activa a la vez: si abrís otra, la primera avisa «JARVIS está abierto en otra ventana» y se queda quieta (recargala con F5 para volver a usarla).
+- **Si algo termina por su cuenta** (una tarea en segundo plano), JARVIS te lo dice cuando no estés hablando con él.
 - Voz, velocidad y tono se ajustan en el panel izquierdo. En Edge aparecen voces "Natural" más realistas.
 
 ## Acciones y confirmación
@@ -87,7 +89,8 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
 
 ## Seguridad y privacidad
-- El servidor solo escucha en `127.0.0.1` y exige un token que se genera en cada arranque y solo conoce la página de JARVIS: otra web abierta en tu navegador no puede mandarle órdenes ni confirmar acciones. Si reiniciás el servidor, recargá la página (F5).
+- El servidor solo escucha en `127.0.0.1` y exige un token que se genera en cada arranque y solo conoce la página de JARVIS: otra web abierta en tu navegador no puede mandarle órdenes ni confirmar acciones. Si reiniciás el servidor, recargá la página (F5). La página se reconecta sola si el canal de eventos se corta, salvo que el token ya no valga (ahí pide F5).
+- El canal de eventos (`GET /api/events`) y todas las acciones POST (`/api/message`, `/api/interrupt`, `/api/confirm`, `/api/new`, `/api/tasks/stop`) exigen el mismo token y el mismo host local; solo un cliente está conectado al canal a la vez.
 - Cada mensaje consume de tu cupo de Claude.
 - El reconocimiento de voz del navegador procesa el audio en servidores de Google (Chrome) o Microsoft (Edge).
 - La personalidad se define en `src/prompt.js`.
@@ -96,7 +99,7 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 ```
 server.js            punto de entrada (reexporta src/server.js; lo usa bin/jarvis.js)
 src/
-  server.js          servidor HTTP: interfaz, /api/chat (SSE) y /api/confirm
+  server.js          servidor HTTP: interfaz, canal de eventos (GET /api/events) y acciones POST
   config.js          configuración leída del entorno (.env)
   prompt.js          prompt de sistema y línea de fecha
   permissions.js     qué pide confirmación y la puerta de confirmaciones

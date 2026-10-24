@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+require('../env'); // antes de leer JARVIS_PORT, para que también valga desde .env
 
 const PORT = Number(process.env.JARVIS_PORT || 7777);
 const URL = `http://localhost:${PORT}`;

@@ -355,6 +355,12 @@
             flushSentences(false);
           } else if (ev === 'tool') {
             $('t-action').textContent = data.app.toUpperCase();
+          } else if (ev === 'open') {
+            addLog('sys', 'Abrí: ' + data.url);
+          } else if (ev === 'music') {
+            // Con música sonando el micrófono la tomaría como si fueras vos: se apaga hasta que toques ESPACIO.
+            if (app.micOn) toggleMic();
+            addLog('sys', `Música: ${data.title || 'YouTube'}. Micrófono apagado, ESPACIO para volver a hablarme.`);
           } else if (ev === 'confirm') {
             flushSentences(true); // primero termina de decir qué va a hacer
             showConfirm(data);

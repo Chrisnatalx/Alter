@@ -8,10 +8,15 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
+const { z } = require('zod');
+require('./env');
 
 const PORT = Number(process.env.JARVIS_PORT || 7777);
 const MODEL = process.env.JARVIS_MODEL || ''; // vacío = modelo por defecto de tu cuenta
 const CONFIRM_TIMEOUT_MS = 2 * 60 * 1000;     // sin respuesta en 2 minutos → se deniega
+// Cuenta de Google con la que abrir Calendar, Gmail, Drive… si hay varias en el navegador.
+const GOOGLE_ACCOUNT = process.env.JARVIS_GOOGLE_ACCOUNT || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 // Directorio vacío donde corre Claude: así no hereda CLAUDE.md ni archivos de otro proyecto.
 const CORE_DIR = path.join(__dirname, '.core');
@@ -34,6 +39,11 @@ const SYSTEM_PROMPT = [
   'Para leer, buscar o consultar no hace falta permiso: hacelo directamente.',
   'Enviar algo (mails, respuestas, invitaciones, mensajes, compartir) o borrar algo requiere que la persona lo confirme; la interfaz se lo pregunta sola, así que no pidas confirmación con texto. Antes de hacerlo, decí en una oración corta qué vas a enviar o borrar.',
   'Si la persona rechaza una acción, no la reintentes: preguntale qué prefiere.',
+  'Podés abrir páginas en el navegador de la persona con la herramienta abrir_en_navegador, sin pedir permiso.',
+  'Usala cuando ver algo ayude más que escucharlo, o cuando te pidan mostrar o abrir algo.',
+  'Si te preguntan por sus reuniones o su agenda de una semana, además de resumirlas en voz abrí Google Calendar en la vista semanal de esa semana: https://calendar.google.com/calendar/r/week/AAAA/M/D con cualquier día de esa semana. Para un solo día usá /r/day/AAAA/M/D.',
+  'Cuando abras algo, decilo en pocas palabras, sin leer la dirección.',
+  'Si te piden poner música o un video de YouTube, usá poner_en_youtube y respondé muy corto.',
   'Al resumir resultados, contá solo lo importante, como lo diría una persona en voz alta.',
 ].join(' ');
 
@@ -95,6 +105,90 @@ function summarizeInput(input) {
 }
 
 // ------------------------------------------------------------------
+//  Herramientas propias de JARVIS
+// ------------------------------------------------------------------
+
+// Abre una URL en el navegador por defecto. Lo hace el servidor y no la página porque el
+// navegador bloquea las ventanas que no salen de un clic (acá la orden llega por voz).
+// Solo http/https: nada de file:, programas ni protocolos raros.
+function openInBrowser(rawUrl) {
+  const url = new URL(rawUrl);
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Solo se pueden abrir direcciones http o https.');
+  if (GOOGLE_ACCOUNT && /(^|\.)google\.com$/i.test(url.hostname) && !url.searchParams.has('authuser')) {
+    url.searchParams.set('authuser', GOOGLE_ACCOUNT);
+  }
+  const href = url.toString();
+  // rundll32 no pasa por cmd, así que los & de la URL no se interpretan como comandos
+  const [cmd, args] = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', href]]
+    : process.platform === 'darwin' ? ['open', [href]] : ['xdg-open', [href]];
+  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+  return href;
+}
+
+// Busca en YouTube y devuelve el primer video (sin publicidades ni shorts, que usan otro formato).
+// Lee la página de resultados porque no requiere API key; si YouTube la cambia, devuelve null.
+async function findYoutubeVideo(search) {
+  const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(search)}`, {
+    headers: { 'Accept-Language': 'es-AR,es;q=0.9', 'User-Agent': 'Mozilla/5.0' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) return null;
+  const html = await res.text();
+  const m = /"videoRenderer":\{"videoId":"([\w-]{11})".*?"title":\{"runs":\[\{"text":"(.*?)"\}/.exec(html);
+  if (!m) return null;
+  let title = m[2];
+  try { title = JSON.parse(`"${title}"`); } catch {} // decodifica escapes como &
+  return { id: m[1], title };
+}
+
+// Servidor MCP en proceso; se arma por pedido para poder avisarle a la interfaz qué se abrió.
+function jarvisTools(sdk, send) {
+  return sdk.createSdkMcpServer({
+    name: 'jarvis',
+    version: '1.0.0',
+    tools: [
+      sdk.tool(
+        'abrir_en_navegador',
+        'Abre una página web en una pestaña nueva del navegador de la persona, para mostrarle algo visualmente (su calendario, un mail, un documento, un repo, una búsqueda).',
+        { url: z.string().describe('Dirección completa, con https://') },
+        async ({ url }) => {
+          try {
+            const href = openInBrowser(url);
+            console.log(`  [ABIERTO] ${href}`);
+            send('open', { url: href });
+            return { content: [{ type: 'text', text: `Abierto en el navegador: ${href}` }] };
+          } catch (err) {
+            return { content: [{ type: 'text', text: `No pude abrirlo: ${err.message}` }], isError: true };
+          }
+        },
+      ),
+      sdk.tool(
+        'poner_en_youtube',
+        'Reproduce música o un video de YouTube: busca y abre el primer resultado en el navegador. Al usarla, la interfaz apaga el micrófono para que la música no se tome como voz.',
+        { busqueda: z.string().describe('Qué buscar, por ejemplo "Queen Bohemian Rhapsody" o "lofi para concentrarse"') },
+        async ({ busqueda }) => {
+          try {
+            const video = await findYoutubeVideo(busqueda);
+            // Si no se pudo leer el resultado, al menos abrir la búsqueda para elegir a mano
+            const href = openInBrowser(video
+              ? `https://www.youtube.com/watch?v=${video.id}`
+              : `https://www.youtube.com/results?search_query=${encodeURIComponent(busqueda)}`);
+            console.log(`  [YOUTUBE] ${href}`);
+            send('open', { url: href });
+            send('music', { title: video?.title || '' });
+            return { content: [{ type: 'text', text: video
+              ? `Reproduciendo «${video.title}» en el navegador. El micrófono quedó apagado: avisale que toque ESPACIO para volver a hablarte.`
+              : 'No pude identificar el video; abrí la búsqueda de YouTube para que elija. El micrófono quedó apagado: avisale que toque ESPACIO para volver a hablarte.' }] };
+          } catch (err) {
+            return { content: [{ type: 'text', text: `No pude abrir YouTube: ${err.message}` }], isError: true };
+          }
+        },
+      ),
+    ],
+  });
+}
+
+// ------------------------------------------------------------------
 //  HTTP
 // ------------------------------------------------------------------
 const MIME = {
@@ -145,7 +239,7 @@ function nowLine() {
 
 // POST /api/chat  { text, sessionId? }  →  Server-Sent Events:
 //   init {sessionId, model} · delta {text} · tool {app, action}
-//   confirm {id, app, action, detail} · done {sessionId, ms} · error {message}
+//   confirm {id, app, action, detail} · open {url} · music {title} · done {sessionId, ms} · error {message}
 async function handleChat(req, res) {
   let payload;
   try { payload = await readJson(req); } catch { res.writeHead(400).end(); return; }
@@ -197,8 +291,10 @@ async function handleChat(req, res) {
   let sessionId = payload.sessionId || null;
   let finished = false;
   try {
-    const { query } = await loadSdk();
+    const sdk = await loadSdk();
+    const { query } = sdk;
     const options = {
+      mcpServers: { jarvis: jarvisTools(sdk, send) },
       cwd: CORE_DIR,
       abortController: abort,
       includePartialMessages: true,

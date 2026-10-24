@@ -2,7 +2,7 @@
 
 Interfaz de voz futurista para conversar con Claude usando **tu suscripción**. No usa API key: el servidor local usa el [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk), que autentica con tu login de Claude Code.
 
-JARVIS tiene acceso a tus **conectores y plugins** (Gmail, Google Calendar, Drive, GitHub, etc.) y a búsqueda web, pero **cada acción te la pide confirmar** antes de ejecutarla, por voz («sí» / «no») o con un botón.
+JARVIS tiene acceso a tus **conectores y plugins** (Gmail, Google Calendar, Drive, GitHub, etc.) y a búsqueda web. Lee y busca sin preguntar; **solo te pide confirmación antes de enviar o borrar algo**, por voz («sí» / «no») o con un botón.
 
 ## Requisitos
 - Node 18 o superior
@@ -31,18 +31,20 @@ Levanta el servidor y abre la interfaz. Si ya estaba corriendo, solo abre la ven
 - **Hablá directamente**: JARVIS detecta cuándo empezás y terminás de hablar (tras una pausa corta envía la frase), responde y vuelve a escuchar.
 - **ESPACIO** o botón **MICRÓFONO**: prende/apaga la escucha.
 - **ESC**, o tocar el núcleo mientras habla: interrumpe la respuesta y vuelve a escucharte.
-- Mientras JARVIS habla no escucha, para no oírse a sí mismo por los parlantes.
+- **Interrumpir hablando**: mientras JARVIS habla sigue escuchando. Ignora las palabras que él mismo está diciendo (el micrófono también capta los parlantes) y corta cuando oye 3 palabras nuevas o una orden como «basta», «callate», «esperá» o «Jarvis». Con auriculares funciona mejor.
 - **NUEVA**: empieza una conversación sin contexto previo.
 - Voz, velocidad y tono se ajustan en el panel izquierdo. En Edge aparecen voces "Natural" más realistas.
 
 ## Acciones y confirmación
-Cuando JARVIS quiere usar una herramienta (leer tu calendario, buscar un mail, crear un evento…):
-1. Te dice en una oración qué va a hacer.
+Leer, buscar y consultar (tu calendario, tus mails, la web…) corre solo. Piden confirmación las acciones que **envían** algo a otras personas (mandar, responder o reenviar un mail, compartir, invitar, publicar, push o merge, comentar, y crear o mover eventos con invitados) o que **borran** algo (borrar, mandar a la papelera, quitar, revocar). La regla está en `needsConfirm` dentro de `server.js`.
+
+Cuando hace falta confirmar:
+1. Te dice en una oración qué va a enviar o borrar.
 2. Aparece el panel **AUTORIZACIÓN REQUERIDA** con el detalle exacto de la acción.
-3. Te pregunta «¿Me autorizás a usar …?» y escucha tu respuesta: «sí», «dale», «confirmo» / «no», «cancelá».
+3. Te pregunta «¿Me autorizás a usar …?» y escucha tu respuesta: «sí», «dale», «confirmo» / «no», «cancelá». Si la frase trae un sí y un no a la vez, vuelve a preguntar. En el registro queda qué entendió («Escuché: …»).
 4. Si no respondés en 2 minutos, o interrumpís, la acción se rechaza.
 
-Las lecturas también piden confirmación. De las herramientas internas de Claude Code solo están habilitadas las de web (sin terminal ni archivos). Los hooks y la memoria de archivos de Claude Code están desactivados en JARVIS.
+De las herramientas internas de Claude Code solo están habilitadas las de web (sin terminal ni archivos). Los hooks y la memoria de archivos de Claude Code están desactivados en JARVIS.
 
 ## Configuración (variables de entorno)
 | Variable | Default | Para qué |

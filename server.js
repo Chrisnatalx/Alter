@@ -1,8 +1,8 @@
 // JARVIS — servidor local.
 // Sirve la interfaz (public/) y hace de puente entre el navegador y Claude a través del
 // Claude Agent SDK, que usa el login de Claude Code (tu suscripción). JARVIS tiene acceso
-// a tus conectores y plugins, pero CADA uso de una herramienta se frena en `canUseTool`
-// hasta que la persona lo confirma desde la interfaz (por voz o con un botón).
+// a tus conectores y plugins. Las acciones que envían o borran algo se frenan en `canUseTool`
+// hasta que la persona lo confirma desde la interfaz (por voz o con un botón); el resto corre solo.
 
 const http = require('http');
 const fs = require('fs');
@@ -23,7 +23,7 @@ const TOKEN = crypto.randomBytes(24).toString('hex');
 const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 
 const SYSTEM_PROMPT = [
-  'Sos JARVIS, un asistente de voz futurista que conversa con la persona usuaria en tiempo real.',
+  'Sos JARVIS, un asistente de voz futurista que conversa con la persona usuaria en tiempo real. Se llama Nata.',
   'Todo lo que escribas se va a leer en voz alta con síntesis de voz.',
   'Respondé en español rioplatense, con calidez y un toque de ingenio elegante.',
   'Sé conciso: por defecto entre una y cuatro oraciones cortas, salvo que te pidan detalle.',
@@ -31,8 +31,8 @@ const SYSTEM_PROMPT = [
   'Escribí los números y símbolos como se pronuncian cuando ayude a la lectura.',
   'Si algo no lo sabés con certeza, decilo y distinguí hechos de suposiciones.',
   'Tenés herramientas: los conectores y plugins de la persona (por ejemplo Gmail, Google Calendar, Google Drive, GitHub) y búsqueda web.',
-  'Antes de usar una herramienta, decí en una sola oración corta qué vas a hacer y con qué datos.',
-  'Cada uso de herramienta requiere que la persona lo confirme; la interfaz se lo pregunta sola, así que no pidas confirmación con texto.',
+  'Para leer, buscar o consultar no hace falta permiso: hacelo directamente.',
+  'Enviar algo (mails, respuestas, invitaciones, mensajes, compartir) o borrar algo requiere que la persona lo confirme; la interfaz se lo pregunta sola, así que no pidas confirmación con texto. Antes de hacerlo, decí en una oración corta qué vas a enviar o borrar.',
   'Si la persona rechaza una acción, no la reintentes: preguntale qué prefiere.',
   'Al resumir resultados, contá solo lo importante, como lo diría una persona en voz alta.',
 ].join(' ');
@@ -68,6 +68,19 @@ function describeTool(toolName, mcpServer) {
   }
   const builtin = { WebSearch: 'búsqueda web', WebFetch: 'lectura de una página web' };
   return { app: builtin[toolName] || toolName, action: '' };
+}
+
+// Solo piden confirmación las acciones que envían algo a otras personas o borran algo.
+// Todo lo demás (leer, buscar, consultar, crear borradores) se autoriza solo.
+const SENDS = /(^|_)(send|reply|forward|share|invite|publish|push|merge)(_|$)|^(add|create)_.*comment/i;
+const DELETES = /(^|_)(delete|trash|remove|revoke|destroy)(_|$)/i;
+function needsConfirm(toolName, input) {
+  const action = /^mcp__.+?__(.+)$/.exec(toolName)?.[1];
+  if (!action) return false; // herramientas internas: solo web (búsqueda y lectura)
+  if (SENDS.test(action) || DELETES.test(action)) return true;
+  // Crear o mover un evento con invitados les manda la invitación por mail
+  if (/event/i.test(action) && Array.isArray(input?.attendees) && input.attendees.length) return true;
+  return false;
 }
 
 // Resume el input de la herramienta para mostrarlo en pantalla (no se lee en voz alta).
@@ -155,8 +168,13 @@ async function handleChat(req, res) {
     for (const id of myConfirms) pending.get(id)?.resolve(false);
   });
 
-  // Toda herramienta pasa por acá: preguntamos en la interfaz y esperamos la respuesta.
+  // Toda herramienta pasa por acá: si envía o borra algo, preguntamos en la interfaz y esperamos.
   const canUseTool = (toolName, input, opts) => new Promise((resolve) => {
+    if (!needsConfirm(toolName, input)) {
+      console.log(`  [AUTOMÁTICO] ${toolName}`);
+      resolve({ behavior: 'allow', updatedInput: input });
+      return;
+    }
     const id = crypto.randomUUID();
     const { app, action } = describeTool(toolName, opts.mcpServer);
     const finish = (allowed) => {

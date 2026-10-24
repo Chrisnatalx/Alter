@@ -240,10 +240,11 @@
   function speak(text, standalone = false) {
     const clean = forSpeech(text);
     if (!clean || !synth || app.muted) { if (standalone) return; maybeFinishSpeaking(); return; }
+    for (const w of words(clean)) spoken.add(w); // para reconocer su propio eco al interrumpir
     const u = new SpeechSynthesisUtterance(clean);
     if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = 'es-AR';
     u.rate = +rateEl.value; u.pitch = +pitchEl.value;
-    u.onstart = () => { app.voicePulse = 1; if (app.state === 'thinking') setState('speaking'); };
+    u.onstart = () => { app.voicePulse = 1; if (app.state === 'thinking') setState('speaking'); startBargeIn(); };
     u.onboundary = () => { app.voicePulse = Math.min(1, app.voicePulse + 0.6); };
     u.onend = u.onerror = () => { pendingUtterances = Math.max(0, pendingUtterances - 1); maybeFinishSpeaking(); };
     pendingUtterances++;
@@ -289,6 +290,7 @@
     text = text.trim();
     if (!text) { setState('idle'); return; }
     interrupt();
+    spoken = new Set();
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
     addLog('user', text);
@@ -303,6 +305,9 @@
     let speakBuf = '';
     const t0 = performance.now();
     let firstToken = true;
+    // La primera respuesta continúa el saludo de arranque en vez de saludar de nuevo
+    const greetContext = app.greetPending ? `[Al iniciar ya le dijiste: «${GREETING}». Esta es su respuesta.]\n` : '';
+    app.greetPending = false;
 
     const flushSentences = (force) => {
       // Lee por oraciones completas para que la voz empiece rápido y suene natural
@@ -321,7 +326,7 @@
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
-        body: JSON.stringify({ text, sessionId: app.sessionId }),
+        body: JSON.stringify({ text: greetContext + text, sessionId: app.sessionId }),
         signal: controller.signal,
       });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
@@ -397,6 +402,7 @@
     $('confirm').hidden = false;
     $('t-action').textContent = 'ESPERANDO OK';
     addLog('sys', `Pide autorización: ${data.app}${data.action ? ' · ' + data.action : ''}`);
+    stopBargeIn(); // la escucha del sí/no arranca sola cuando termina la pregunta
     setState('confirming');
     speak(`¿Me autorizás a usar ${data.app}?`);
   }
@@ -422,14 +428,15 @@
     }).catch((e) => console.error('No pude enviar la confirmación', e));
   }
 
-  // Devuelve true (sí), false (no) o null (no se entendió). Gana la primera palabra clave dicha.
+  // Devuelve true (sí), false (no) o null (no se entendió). Si la frase trae un sí y un no
+  // («no hace falta, sí»), es ambigua y se vuelve a preguntar: enviar o borrar no se adivina.
   function parseYesNo(text) {
-    const t = ' ' + text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ') + ' ';
-    const find = (words) => Math.min(...words.map((w) => { const i = t.indexOf(' ' + w + ' '); return i < 0 ? Infinity : i; }));
-    const yes = find(['si', 'dale', 'confirmo', 'confirmar', 'confirmado', 'ok', 'okey', 'okay', 'claro', 'adelante', 'hacelo', 'de una', 'afirmativo', 'perfecto', 'listo', 'autorizo', 'autorizado', 'yes']);
-    const no = find(['no', 'cancela', 'cancelar', 'cancelalo', 'negativo', 'para', 'frena', 'nada', 'nope']);
-    if (yes === Infinity && no === Infinity) return null;
-    return yes < no;
+    const t = ' ' + text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
+    const has = (words) => words.some((w) => t.includes(' ' + w + ' '));
+    const yes = has(['si', 'dale', 'confirmo', 'confirmar', 'confirmado', 'ok', 'okey', 'okay', 'claro', 'adelante', 'hacelo', 'de una', 'afirmativo', 'perfecto', 'listo', 'autorizo', 'autorizado', 'yes']);
+    const no = has(['no', 'cancela', 'cancelar', 'cancelalo', 'negativo', 'para', 'frena', 'nada', 'nope']);
+    if (yes === no) return null;
+    return yes;
   }
 
   function listenForConfirm() {
@@ -445,6 +452,7 @@
       rec = null;
       if (!app.confirm) return;
       const v = said ? parseYesNo(said) : null;
+      if (said) addLog('sys', `Escuché: «${said}»`); // deja registro de qué se entendió como sí/no
       if (v !== null) answerConfirm(v);
       else if (said) speak('No te entendí. Decí sí o no.'); // al terminar de hablar vuelve a escuchar
       else setTimeout(listenForConfirm, 250);
@@ -488,6 +496,7 @@
   function startListening() {
     if (!SR) { $('sub-ai').textContent = 'Este navegador no soporta reconocimiento de voz. Usá Chrome o Edge, o escribí abajo.'; return; }
     if (app.state === 'listening') return;
+    stopBargeIn();
     interrupt(); // hablar encima de JARVIS lo interrumpe
     ensureMicMeter();
     heard = '';
@@ -529,9 +538,63 @@
     try { rec.start(); } catch { setState('idle'); }
   }
 
+  // ------------------------------------------------------------
+  //  Interrumpir hablando: escucha mientras JARVIS habla. El micrófono también capta los
+  //  parlantes, así que se ignoran las palabras que JARVIS dijo en este turno; corta solo
+  //  si oye varias palabras nuevas o una orden de corte.
+  // ------------------------------------------------------------
+  let spoken = new Set();
+  const STOP_WORDS = ['basta', 'callate', 'para', 'espera', 'stop', 'alto', 'silencio', 'jarvis'];
+  const BARGE_MIN_WORDS = 3;
+  function words(s) {
+    return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  }
+
+  function startBargeIn() {
+    if (!SR || !app.micOn || rec || app.state !== 'speaking') return;
+    let cut = false;
+    heard = '';
+    const r = rec = new SR();
+    r.bargeIn = true;
+    r.lang = 'es-AR';
+    r.interimResults = true;
+    r.continuous = false;
+    r.onresult = (e) => {
+      const w = words(Array.from(e.results).map((x) => x[0].transcript).join(' '));
+      if (!cut) {
+        const foreign = w.filter((x) => !spoken.has(x));
+        if (foreign.length < BARGE_MIN_WORDS && !foreign.some((x) => STOP_WORDS.includes(x))) return;
+        cut = true;
+        interrupt(); // corta la voz y la respuesta en curso
+        setState('listening');
+      }
+      let i = 0;
+      while (i < w.length && spoken.has(w[i])) i++; // descarta el eco del principio
+      heard = w.slice(i).join(' ');
+      $('sub-user').textContent = heard;
+    };
+    r.onend = () => {
+      if (rec === r) rec = null;
+      if (cut) {
+        if (app.state !== 'listening') return;
+        if (heard) ask(heard);
+        else { setState('idle'); if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 250); }
+      } else if (app.state === 'speaking') setTimeout(startBargeIn, 100); // sigue hablando: seguir atento
+    };
+    try { r.start(); } catch { rec = null; }
+  }
+
+  function stopBargeIn() {
+    if (!rec?.bargeIn) return;
+    const r = rec; rec = null;
+    r.onend = null; r.onresult = null;
+    r.abort();
+  }
+
   function toggleMic() {
     app.micOn = !app.micOn; store.set('micOn', app.micOn); syncButtons();
     if (app.state === 'confirming') { if (app.micOn) listenForConfirm(); else if (rec) rec.abort(); return; }
+    if (app.state === 'speaking') { if (app.micOn) startBargeIn(); else stopBargeIn(); return; }
     if (app.micOn && app.state === 'idle') startListening();
     if (!app.micOn && rec) { rec.abort(); setState('idle'); }
   }
@@ -603,6 +666,8 @@
     ['Protocolos de personalidad', 'OK'],
   ];
 
+  const GREETING = 'Hola Nata, ¿cómo estás?';
+
   async function boot() {
     syncButtons(); updateTelemetry();
     // ?skip salta la animación (útil al recargar); el audio se habilita con el primer clic o tecla
@@ -625,21 +690,33 @@
     const ready = document.createElement('div'); ready.className = 'ok'; ready.textContent = '\n> SISTEMA LISTO.';
     log.appendChild(ready);
     if (!SR) { const w = $('boot-warn'); w.hidden = false; w.textContent = 'Para hablar por voz abrí esta página en Chrome o Edge. Igual podés escribir.'; }
-    const btn = $('boot-btn');
-    btn.hidden = false; btn.focus();
-    btn.addEventListener('click', () => {
-      // El primer clic habilita audio y micrófono (los navegadores lo exigen)
-      setState('idle');
-      ensureMicMeter();
-      const h = new Date().getHours();
-      const saludo = h < 12 ? 'Buen día' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
-      const intro = `${saludo}. Sistemas en línea. ${app.micOn ? 'Te escucho, hablame cuando quieras.' : 'El micrófono está apagado, tocá la barra espaciadora para prenderlo.'}`;
-      $('sub-ai').textContent = intro;
-      streamDone = true;
-      setState('speaking');
-      if (app.muted) setState('idle');
-      speak(intro);
-    }, { once: true });
+    await wait(600);
+    // Entra solo al terminar la animación, sin botón
+    setState('idle');
+    ensureMicMeter();
+    const intro = `${GREETING}${app.micOn ? '' : ' El micrófono está apagado, tocá la barra espaciadora para prenderlo.'}`;
+    $('sub-ai').textContent = intro;
+    addLog('ai', intro);
+    app.greetPending = true; // el primer mensaje le avisa a Claude que ya saludó
+    streamDone = true;
+    setState('speaking');
+    if (app.muted) setState('idle');
+    speak(intro);
+    // Chrome bloquea la síntesis de voz sin un gesto previo: si el saludo no sonó, se repite con el primer clic o tecla
+    setTimeout(() => {
+      if (!synth || app.muted || synth.speaking || synth.pending) return;
+      const retry = (e) => {
+        if (e.code === 'Space') return; // la barra espaciadora ya tiene su propio uso (micrófono)
+        removeEventListener('pointerdown', retry); removeEventListener('keydown', retry);
+        if (app.state !== 'idle' && app.state !== 'listening') return; // ya arrancó la conversación
+        // Cortar la escucha mientras habla: si no, el micrófono capta su propia voz como si fuera tuya
+        setState('speaking');
+        if (rec) rec.abort();
+        streamDone = true;
+        speak(intro);
+      };
+      addEventListener('pointerdown', retry); addEventListener('keydown', retry);
+    }, 1200);
   }
   boot();
 })();

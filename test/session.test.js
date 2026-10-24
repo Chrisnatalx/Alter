@@ -5,7 +5,7 @@ const { createInputQueue, mapMessage, Session } = require('../src/session');
 const init = { type: 'system', subtype: 'init', session_id: 'sid-1', model: 'haiku' };
 const delta = (text, parent = null) => ({ type: 'stream_event', parent_tool_use_id: parent, event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } });
 const success = { type: 'result', subtype: 'success', session_id: 'sid-1', result: 'ok' };
-const mkState = () => ({ userSince: false, taskSince: false, interrupting: false, turnStartedAt: Date.now(), sessionId: null, tasks: [] });
+const mkState = () => ({ userSince: false, taskPending: 0, interrupting: false, turnStartedAt: Date.now(), sessionId: null, tasks: [] });
 
 test('createInputQueue entrega en orden lo enviado antes y después de iterar', async () => {
   const q = createInputQueue();
@@ -39,13 +39,13 @@ test('task turn origin: task_notification y luego init sin send da origin task',
   const state = mkState();
   mapMessage({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'listo' }, state);
   assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'task' }]);
-  // las banderas se limpian: el siguiente init vuelve a ser 'user'
+  // consumida la notificación, el siguiente init vuelve a ser 'user'
   assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'user' }]);
 });
 
 test('si la persona escribió, el origen es user aunque haya llegado una tarea', () => {
   const state = mkState();
-  state.taskSince = true;
+  state.taskPending = 1;
   state.userSince = true;
   assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'user' }]);
 });
@@ -88,7 +88,7 @@ function fakeQuery(script = []) {
     calls.args = args;
     return {
       async *[Symbol.asyncIterator]() { for (const m of script) yield m; await gate; },
-      async interrupt(opts) { calls.interrupt++; calls.interruptArgs.push(opts); },
+      async interrupt(opts) { calls.interrupt++; calls.interruptArgs.push(opts); return calls.interruptResult; },
       async cancelAsyncMessage(id) { calls.cancelled.push(id); },
       async stopTask(id) { calls.stopTask.push(id); },
       close() { calls.close++; release(); },
@@ -139,10 +139,11 @@ test('start: resume solo con UUID válido y sin abortController', () => {
 });
 
 test('interrupt denies pending confirms', async () => {
-  const { queryFn, calls } = fakeQuery();
+  const { queryFn, calls } = fakeQuery([init]);
   const events = [];
   const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn });
   s.start({});
+  await tick(); // hay un turno de la persona en curso
   const decision = calls.args.options.canUseTool('mcp__claude_ai_Gmail__send_message', { to: 'a@b.c' }, {});
   assert.equal(events.filter(([e]) => e === 'confirm').length, 1);
   await s.interrupt();
@@ -257,25 +258,30 @@ test('con la sesión cerrada no emite los mensajes que siguen llegando', async (
 
 const taskInit = { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'listo' };
 
-test('interrupt en turno de la persona: corta con cancelQueued y descarta la cola sin entregar', async () => {
+test('interrupt en turno de la persona: interrupt simple, cancela solo still_queued que mandó la persona', async () => {
   const { queryFn, calls } = fakeQuery([init]);
   const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
   s.start({});
-  s.send('a'); // el SDK falso no consume la cola: queda sin entregar
-  s.send('b');
   await tick();
+  const it = s.queue.iterable[Symbol.asyncIterator]();
+  const u1 = s.send('a'); await it.next(); // ya lo tomó el SDK
+  const u2 = s.send('b'); await it.next(); // ya lo tomó el SDK
+  s.send('c'); // este queda sin entregar: se descarta local
+  calls.interruptResult = { still_queued: [u2, 'notificacion-de-tarea'] };
+  const decision = calls.args.options.canUseTool('mcp__claude_ai_Gmail__send_message', { to: 'a@b.c' }, {});
   await s.interrupt();
-  assert.deepEqual(calls.interruptArgs, [{ cancelQueued: true }]);
-  assert.deepEqual(calls.cancelled, []);
-  assert.equal(s.state.interrupting, true); // había un turno activo
+  assert.equal((await decision).behavior, 'deny');
+  assert.deepEqual(calls.interruptArgs, [undefined]); // sin cancelQueued
+  assert.deepEqual(calls.cancelled, [u2]); // ni u1 (ya corrió) ni la notificación (no es nuestra)
+  assert.equal(s.state.interrupting, true);
   assert.deepEqual(s.pushed, []);
   assert.equal(s.state.userSince, false);
   s.queue.close();
-  assert.equal((await s.queue.iterable[Symbol.asyncIterator]().next()).done, true); // nada que entregar
+  assert.equal((await it.next()).done, true); // 'c' nunca sale hacia el SDK
   s.close();
 });
 
-test('interrupt en turno de tarea: no aborta, cancela por uuid los mensajes recordados', async () => {
+test('interrupt en turno de tarea: no aborta ni deniega, cancela por uuid los mensajes recordados', async () => {
   const { queryFn, calls } = fakeQuery([taskInit, init]);
   const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
   s.start({});
@@ -285,12 +291,41 @@ test('interrupt en turno de tarea: no aborta, cancela por uuid los mensajes reco
   const u2 = s.send('b');
   const it = s.queue.iterable[Symbol.asyncIterator]();
   await it.next(); await it.next(); // el SDK ya tomó los dos: solo se pueden cancelar por uuid
+  let decided = false;
+  calls.args.options.canUseTool('mcp__claude_ai_Gmail__send_message', { to: 'a@b.c' }, {}).then(() => { decided = true; });
   await s.interrupt();
+  await tick();
   assert.equal(calls.interrupt, 0);
+  assert.equal(decided, false); // la confirmación de la tarea sigue pendiente
   assert.deepEqual(calls.cancelled, [u1, u2]);
   assert.equal(s.state.interrupting, false);
   assert.deepEqual(s.pushed, []);
   s.close();
+});
+
+test('interrupt sin turno activo: no interrumpe, cancela por uuid lo enviado y limpia la cola local', async () => {
+  const { queryFn, calls } = fakeQuery([]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  const it = s.queue.iterable[Symbol.asyncIterator]();
+  const u1 = s.send('a'); await it.next();
+  s.send('b'); // sin entregar
+  await s.interrupt();
+  assert.equal(calls.interrupt, 0);
+  assert.deepEqual(calls.cancelled, [u1]);
+  assert.equal(s.state.userSince, false);
+  s.queue.close();
+  assert.equal((await it.next()).done, true);
+  s.close();
+});
+
+test('origen: una notificación sigue valiendo para un turno posterior aunque antes corra uno de la persona', () => {
+  const state = mkState();
+  mapMessage({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'x' }, state);
+  state.userSince = true; // la persona pregunta antes de que corra el turno de la tarea
+  assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'user' }]);
+  assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'task' }]);
+  assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'user' }]);
 });
 
 test('interrupt en turno de tarea ignora el rechazo de un uuid ya consumido', async () => {

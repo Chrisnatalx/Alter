@@ -39,7 +39,7 @@ function createInputQueue() {
 }
 
 function createState() {
-  return { userSince: false, taskSince: false, interrupting: false, turnActive: false, turnOrigin: null, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
+  return { userSince: false, taskPending: 0, interrupting: false, turnActive: false, turnOrigin: null, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
 }
 
 // Traduce un mensaje del SDK a eventos para la interfaz. Pura salvo por `state`, que se muta.
@@ -47,9 +47,10 @@ function mapMessage(msg, state) {
   if (msg.type === 'system') {
     switch (msg.subtype) {
       case 'init': {
-        const origin = state.userSince ? 'user' : state.taskSince ? 'task' : 'user';
-        state.userSince = false;
-        state.taskSince = false;
+        // La persona escribió → turno suyo; si no, uno por cada notificación de tarea aún sin turno; si no, suyo
+        let origin = 'user';
+        if (state.userSince) state.userSince = false;
+        else if (state.taskPending > 0) { state.taskPending--; origin = 'task'; }
         state.turnStartedAt = Date.now();
         state.turnActive = true; // hay un turno en curso hasta que llegue su result
         state.turnOrigin = origin;
@@ -60,7 +61,7 @@ function mapMessage(msg, state) {
       case 'task_started':
         return [['task', { id: msg.task_id, status: 'running', description: msg.description, agent: msg.subagent_type }]];
       case 'task_notification':
-        state.taskSince = true; // el turno que sigue lo arranca la tarea, no la persona
+        state.taskPending++; // un turno que sigue lo arranca la tarea, no la persona
         return [['task', { id: msg.task_id, status: msg.status, summary: msg.summary }]];
       case 'background_tasks_changed':
         state.tasks = (msg.tasks || []).map((t) => ({ id: t.task_id, description: t.description, agent: t.subagent_type }));
@@ -143,26 +144,30 @@ class Session {
     return uuid;
   }
 
-  // Corta el turno actual de la persona y descarta sus mensajes en cola (el SDK los juntaría en el turno
-  // siguiente y se respondería algo ya cancelado). Las tareas en segundo plano siguen.
+  // Corta el turno de la persona y descarta los mensajes suyos que aún esperan; las tareas en segundo plano
+  // y sus notificaciones siguen (una cancelación masiva de la cola también descartaría esas notificaciones).
   async interrupt() {
-    this.gate.denyAll();
+    const st = this.state;
     const local = this.queue.clear(); // lo que no salió hacia el SDK no debe salir nunca
     this.pushed = this.pushed.filter((id) => !local.includes(id));
-    if (!this.q) return;
-    this.state.userSince = false; // lo que esperaba su turno se descartó: el próximo turno no es de la persona
-    if (this.state.turnActive && this.state.turnOrigin === 'task') {
-      // Un turno de tarea no se aborta: solo se cancelan los mensajes ya enviados que esperan detrás.
-      // Un uuid que ya se consumió o no existe rechaza la cancelación: no importa.
-      const ids = this.pushed.splice(0);
-      await Promise.all(ids.map((id) => Promise.resolve().then(() => this.q.cancelAsyncMessage(id)).catch(() => {})));
-      return;
+    if (!this.q) { st.userSince = false; return; }
+    // Un uuid ya consumido o inexistente rechaza la cancelación: no importa
+    const cancel = (ids) => Promise.all(ids.map((id) => Promise.resolve().then(() => this.q.cancelAsyncMessage(id)).catch(() => {})));
+    if (st.turnActive && st.turnOrigin !== 'task') {
+      this.gate.denyAll();
+      st.interrupting = true;
+      let r;
+      try { r = await this.q.interrupt(); } catch (err) { st.interrupting = false; throw err; }
+      // El recibo lista lo que quedó en cola sin correr: se cancela solo lo que mandó la persona
+      const still = new Set(r?.still_queued || []);
+      const ids = this.pushed.filter((id) => still.has(id));
+      this.pushed = [];
+      await cancel(ids);
+    } else {
+      // Turno de tarea o ninguno: no se aborta nada; solo se cancelan los mensajes de la persona que esperan
+      await cancel(this.pushed.splice(0));
     }
-    // Sin turno en curso no hay nada que cortar: marcar la bandera haría pasar un error real por interrupción
-    if (this.state.turnActive) this.state.interrupting = true;
-    this.pushed = [];
-    // `cancelQueued` existe en sdk.mjs (capacidad interrupt_cancel_queued_v1 en system/init) pero falta en sdk.d.ts
-    try { await this.q.interrupt({ cancelQueued: true }); } catch (err) { this.state.interrupting = false; throw err; }
+    st.userSince = false; // lo que esperaba su turno se descartó: el próximo turno no es de la persona
   }
 
   async stopTask(taskId) { await this.q?.stopTask(taskId); }

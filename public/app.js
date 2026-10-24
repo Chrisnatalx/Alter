@@ -305,7 +305,8 @@
   let userBusy = false;    // el servidor está respondiendo a la persona (interrumpible)
   let turnOrigin = 'user'; // quién arrancó el turno que está llegando por el canal
   let askSeq = 0;          // sube con cada ask() e interrupt(): un ask viejo no manda su mensaje si lo cortaron antes
-  let staleTurn = false;   // tras interrumpir se ignora lo que llegue hasta que empiece un turno nuevo
+  let activeTurn = false;  // hay un turno en curso en el servidor (desde su `turn` hasta su `done`/`error`)
+  let staleTurn = false;   // solo el turno que estaba activo al interrumpir: se ignora hasta que termine
   let taskBuffer = '';     // texto de un turno de tarea: se acumula y se dice entero al terminar
   const taskQueue = [];    // resultados de tareas esperando a que JARVIS esté libre
 
@@ -379,12 +380,14 @@
 
   // Corta la voz local y, si el servidor está respondiendo, también esa respuesta.
   // Devuelve la promesa del POST (o null) para que ask() espere antes de mandar lo nuevo.
-  function interrupt(localOnly = false) {
+  function interrupt(onlyIfActive = false) {
     let sent = null;
     askSeq++;
-    // El servidor decide qué cortar: el turno de la persona y sus mensajes en cola; un turno de tarea sigue
-    if (!localOnly) sent = post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
-    if (userBusy && turnOrigin !== 'task') staleTurn = true; // lo que siga de ese turno se ignora
+    const userTurnActive = activeTurn && turnOrigin !== 'task';
+    // El servidor decide qué cortar: el turno de la persona y sus mensajes en cola; un turno de tarea sigue.
+    // Con onlyIfActive (empezar a escuchar) solo avisa si hay un turno de la persona en curso.
+    if (!onlyIfActive || userTurnActive) sent = post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
+    if (userTurnActive) staleTurn = true; // lo que siga de ese turno se ignora hasta su `done`
     cur = null; userBusy = false;
     closeConfirm();
     stopSpeaking();
@@ -421,10 +424,18 @@
     switch (ev) {
       case 'turn':
         turnOrigin = data.origin;
-        if (data.origin === 'task') { staleTurn = false; taskBuffer = ''; break; }
-        // `cur` solo existe si la persona preguntó y no interrumpió desde entonces: sin él, este turno es de un
-        // mensaje cancelado (o ajeno) y no se pinta ni se habla.
-        staleTurn = !cur;
+        activeTurn = true;
+        staleTurn = false; // un turno nuevo: el interrumpido ya terminó
+        if (data.origin === 'task') { taskBuffer = ''; break; }
+        if (!cur) { // turno de la persona sin un ask pendiente: se trata como una respuesta normal
+          dropRec();
+          spoken = new Set();
+          $('sub-ai').textContent = '';
+          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
+          userBusy = true; streamDone = false;
+          setState('thinking');
+          $('t-link').textContent = 'TRANSMITIENDO';
+        }
         break;
       case 'init': // el servidor lo repite en cada turno
         $('t-model').textContent = (data.model || '—').replace(/^claude-/, '').toUpperCase();
@@ -466,8 +477,10 @@
         break;
       case 'done':
         if (data.sessionId) { app.sessionId = data.sessionId; store.set('sessionId', app.sessionId); }
-        if (staleTurn) { updateTelemetry(); break; } // cierre del turno que se interrumpió
+        activeTurn = false;
+        if (staleTurn) { staleTurn = false; updateTelemetry(); break; } // cierre del turno que se interrumpió
         if (turnOrigin === 'task') { const t = taskBuffer; taskBuffer = ''; turnOrigin = 'user'; queueTaskTurn(t); endIdleTurn(); break; }
+        if (data.interrupted && cur) break; // cierre tardío de un turno cortado: la pregunta vigente sigue esperando
         flushSentences(true);
         if (!data.interrupted) app.turns++;
         updateTelemetry();
@@ -476,7 +489,8 @@
         maybeFinishSpeaking();
         break;
       case 'error':
-        if (staleTurn) break;
+        activeTurn = false;
+        if (staleTurn) { staleTurn = false; break; }
         if (turnOrigin === 'task') { taskBuffer = ''; turnOrigin = 'user'; addLog('sys', 'Error en una tarea: ' + data.message); endIdleTurn(); break; }
         failTurn(data.message);
         break;
@@ -489,7 +503,7 @@
         setState('idle');
         break;
       case 'reset':
-        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0;
+        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; activeTurn = false; staleTurn = false;
         closeConfirm(); stopSpeaking();
         app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
         $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
@@ -540,7 +554,7 @@
       // Se cortó: si había un turno en curso no va a llegar su final
       if (cur || userBusy) failTurn('Se cortó el canal con el servidor.');
       $('t-link').textContent = 'RECONECTANDO';
-      staleTurn = false;
+      staleTurn = false; activeTurn = false;
       await new Promise((r) => setTimeout(r, Math.min(10000, 1000 * 2 ** fails++))); // 1, 2, 4, 8, 10 s
     }
   }

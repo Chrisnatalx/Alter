@@ -21,3 +21,10 @@ test('el prompt menciona las herramientas propias', () => {
 test('nowLine deriva la ciudad de la zona horaria', () => {
   assert.ok(nowLine('America/Argentina/Buenos_Aires').endsWith(', Buenos Aires'));
 });
+
+test('el prompt trae las reglas de delegación', () => {
+  const p = buildSystemPrompt({});
+  assert.ok(p.includes('investigador'));
+  assert.ok(p.includes('segundo plano'));
+  assert.ok(p.includes('herramienta Agent'));
+});

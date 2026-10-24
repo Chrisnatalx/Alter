@@ -294,6 +294,29 @@
     return span;
   }
 
+  // Panel TAREAS: una fila por tarea, con el estado del SDK traducido
+  const TASK_STATUS = { running: 'EN CURSO', completed: 'LISTA', failed: 'FALLÓ', stopped: 'CANCELADA' };
+  const taskRows = new Map();
+  function setTask(id, status, description) {
+    let row = taskRows.get(id);
+    if (!row) {
+      const li = document.createElement('li');
+      const desc = document.createElement('span'); desc.className = 'desc';
+      const st = document.createElement('span'); st.className = 'st';
+      const btn = document.createElement('button'); btn.className = 'btn mini'; btn.textContent = 'CANCELAR';
+      btn.onclick = () => post('/api/tasks/stop', { taskId: id }).catch((e) => console.error('No pude cancelar la tarea', e));
+      li.append(desc, st, btn);
+      $('tasks').appendChild(li);
+      row = { li, desc, st, btn };
+      taskRows.set(id, row);
+    }
+    if (description) { row.desc.textContent = description; row.desc.title = description; }
+    else if (!row.desc.textContent) row.desc.textContent = id;
+    row.st.textContent = TASK_STATUS[status] || status;
+    row.li.className = status;
+    row.btn.hidden = status !== 'running';
+  }
+
   const post = (url, body = {}) => fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
@@ -467,13 +490,15 @@
         flushSentences(true); // primero termina de decir qué va a hacer
         showConfirm(data);
         break;
-      case 'task':
+      case 'task': {
+        setTask(data.id, data.status, data.description);
         addLog('sys', data.status === 'running'
           ? 'Tarea en segundo plano: ' + (data.description || data.id)
-          : `Tarea ${data.status}${data.summary ? ': ' + data.summary : ''}`);
+          : `Tarea ${TASK_STATUS[data.status] || data.status}${data.summary ? ': ' + data.summary : ''}`);
         break;
-      case 'tasks':
-        $('t-tasks').textContent = (data.tasks || []).length;
+      }
+      case 'tasks': // lista completa de tareas vivas (también al reconectar): las que no están conservan su último estado
+        for (const t of data.tasks || []) setTask(t.id, 'running', t.description);
         break;
       case 'done':
         if (data.sessionId) { app.sessionId = data.sessionId; store.set('sessionId', app.sessionId); }
@@ -504,7 +529,7 @@
         break;
       case 'reset':
         cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; activeTurn = false; staleTurn = false;
-        closeConfirm(); stopSpeaking();
+        closeConfirm(); stopSpeaking(); taskRows.clear(); $('tasks').innerHTML = '';
         app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
         $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
         setState('idle');

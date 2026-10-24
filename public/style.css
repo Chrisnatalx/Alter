@@ -89,6 +89,12 @@ body[data-state="thinking"] .r2, body[data-state="thinking"] .r5 { animation-dur
 .panel-title span { width: 6px; height: 6px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .panel-title .mini { margin-left: auto; }
 .telemetry { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; margin: 0 0 18px; font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+.tasks { list-style: none; margin: 0 0 18px; padding: 0; font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+.tasks:empty::after { content: '—'; opacity: .45; }
+.tasks li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.tasks .desc { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tasks .st { opacity: .6; font-size: 10px; letter-spacing: .1em; }
+.tasks li.running .st { opacity: 1; color: var(--accent); }
 .telemetry dt { opacity: .45; }
 .telemetry dd { margin: 0; text-align: right; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meter { height: 6px; margin-top: 4px; background: var(--cyan-faint); }

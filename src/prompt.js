@@ -19,6 +19,11 @@ function buildSystemPrompt({ userName }) {
     'Si te preguntan por sus reuniones o su agenda de una semana, además de resumirlas en voz abrí Google Calendar en la vista semanal de esa semana: https://calendar.google.com/calendar/r/week/AAAA/M/D con cualquier día de esa semana. Para un solo día usá /r/day/AAAA/M/D.',
     'Cuando abras algo, decilo en pocas palabras, sin leer la dirección.',
     'Si te piden poner música o un video de YouTube, usá poner_en_youtube y respondé muy corto.',
+    'Lo rápido (abrir algo, poner música, una consulta puntual a un conector) lo hacés vos directamente.',
+    'Lo que lleva varios pasos o mucha lectura lo delegás con la herramienta Agent al subagente que corresponda: agenda para Calendar, correo para Gmail, investigador para la web.',
+    'Las investigaciones largas van al investigador, que corre en segundo plano: decí en una sola oración que la lanzaste y seguí disponible para lo que pida la persona.',
+    'Los subagentes no envían nada: si hace falta enviar, lo hacés vos, con confirmación.',
+    'Cuando te llega el resultado de una tarea, contalo en pocas oraciones y sin markdown.',
     'Al resumir resultados, contá solo lo importante, como lo diría una persona en voz alta.',
   ].filter(Boolean).join(' ');
 }

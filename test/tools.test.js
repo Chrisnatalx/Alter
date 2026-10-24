@@ -43,3 +43,12 @@ test('parseYoutubeResults devuelve null sin resultados', () => {
 test('findYoutubeVideo devuelve null si la respuesta no es ok', async () => {
   assert.equal(await findYoutubeVideo('x', async () => ({ ok: false })), null);
 });
+
+test('openInBrowser: si el programa falta, el error se registra y no se propaga', () => {
+  const { EventEmitter } = require('node:events');
+  const child = new EventEmitter();
+  child.unref = () => {};
+  openInBrowser('https://x.com/', () => child);
+  const orig = console.error; console.error = () => {};
+  try { assert.doesNotThrow(() => child.emit('error', new Error('ENOENT'))); } finally { console.error = orig; }
+});

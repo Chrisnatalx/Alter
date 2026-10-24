@@ -19,7 +19,10 @@ function openInBrowser(href, spawnFn = childProcess.spawn) {
   // rundll32 no pasa por cmd, así que los & de la URL no se interpretan como comandos
   const [cmd, args] = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', href]]
     : process.platform === 'darwin' ? ['open', [href]] : ['xdg-open', [href]];
-  spawnFn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+  const child = spawnFn(cmd, args, { detached: true, stdio: 'ignore' });
+  // Si falta el programa que abre el navegador, el error no debe tumbar el servidor
+  child.on?.('error', (err) => console.error('  [ERROR] No pude abrir el navegador:', err.message));
+  child.unref();
 }
 
 module.exports = { buildOpenUrl, openInBrowser };

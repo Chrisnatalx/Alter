@@ -16,16 +16,25 @@ function describeTool(toolName, mcpServer) {
   return { app: builtin[toolName] || toolName, action: '' };
 }
 
-// Solo piden confirmación las acciones que envían algo a otras personas o borran algo.
+// Solo piden confirmación las acciones que envían algo a otras personas, publican o borran algo.
 // Todo lo demás (leer, buscar, consultar, crear borradores) se autoriza solo.
-const SENDS = /(^|_)(send|reply|forward|share|invite|publish|push|merge)(_|$)|^(add|create)_.*comment/i;
+// 'respond' cubre responder a una invitación (RSVP): le llega un mail al organizador.
+const SENDS = /(^|_)(send|reply|forward|share|invite|publish|push|merge|respond)(_|$)|^(add|create)_.*comment/i;
 const DELETES = /(^|_)(delete|trash|remove|revoke|destroy)(_|$)/i;
+// Herramientas de GitHub que publican o modifican algo visible para otros (escribir, abrir, comentar, crear)
+const PUBLISHES = /^(issue_write|sub_issue_write|create_pull_request|update_pull_request|create_or_update_file|update_issue_comment|pull_request_review_write|add_comment_to_pending_review|create_repository|fork_repository)$/i;
+// Campos de un evento de Calendar que llevan invitados (algunos están obsoletos pero siguen funcionando)
+const ATTENDEE_FIELDS = ['attendees', 'attendeeEmails', 'addedAttendees', 'addedAttendeeEmails'];
 function needsConfirm(toolName, input) {
   const action = /^mcp__.+?__(.+)$/.exec(toolName)?.[1];
   if (!action) return false; // herramientas internas: solo web (búsqueda y lectura)
-  if (SENDS.test(action) || DELETES.test(action)) return true;
-  // Crear o mover un evento con invitados les manda la invitación por mail
-  if (/event/i.test(action) && Array.isArray(input?.attendees) && input.attendees.length) return true;
+  if (SENDS.test(action) || DELETES.test(action) || PUBLISHES.test(action)) return true;
+  if (/event/i.test(action)) {
+    // Crear o mover un evento con invitados les manda la invitación por mail
+    if (ATTENDEE_FIELDS.some((f) => Array.isArray(input?.[f]) && input[f].length)) return true;
+    // update_event avisa a todos los invitados por defecto: solo pasa sin preguntar si se pide no notificar
+    if (/(^|_)update(_|$)/i.test(action) && input?.notificationLevel !== 'NONE') return true;
+  }
   return false;
 }
 
@@ -55,6 +64,7 @@ function createPermissionGate({ emit, timeoutMs }) {
     // Un subagente trabaja en segundo plano: no hay nadie mirando la pantalla para confirmar
     if (opts.agentID) {
       console.log(`  [DENEGADO A SUBAGENTE] ${toolName}`);
+      emit('denied', { ...describeTool(toolName, opts.mcpServer), agent: opts.agentID });
       resolve({ behavior: 'deny', message: 'Los subagentes no pueden enviar ni borrar: pedíselo a JARVIS.' });
       return;
     }
@@ -64,15 +74,17 @@ function createPermissionGate({ emit, timeoutMs }) {
       if (!pending.has(id)) return;
       clearTimeout(pending.get(id).timer);
       pending.delete(id);
+      emit('confirm_closed', { id, allowed }); // la interfaz cierra el panel si sigue abierto (timeout, corte, etc.)
       console.log(`  [${allowed ? 'CONFIRMADO' : 'RECHAZADO'}] ${toolName}`);
       resolve(allowed
         ? { behavior: 'allow', updatedInput: input }
         : { behavior: 'deny', message: 'La persona no autorizó esta acción.' });
     };
+    const payload = { id, app, action, title: opts.title || '', detail: summarizeInput(input) };
     const timer = setTimeout(() => finish(false), timeoutMs);
-    pending.set(id, { resolve: finish, timer });
+    pending.set(id, { resolve: finish, timer, payload });
     opts.signal?.addEventListener('abort', () => finish(false));
-    emit('confirm', { id, app, action, title: opts.title || '', detail: summarizeInput(input) });
+    emit('confirm', payload);
   });
 
   return {
@@ -85,6 +97,8 @@ function createPermissionGate({ emit, timeoutMs }) {
     },
     denyAll() { for (const p of [...pending.values()]) p.resolve(false); },
     pendingCount: () => pending.size,
+    // Confirmaciones sin responder: se reenvían a la interfaz cuando se reconecta
+    pending: () => [...pending.values()].map((p) => p.payload),
   };
 }
 

@@ -61,13 +61,17 @@ Levanta el servidor y abre la interfaz. Si ya estaba corriendo, solo abre la ven
 - Voz, velocidad y tono se ajustan en el panel izquierdo. En Edge aparecen voces "Natural" más realistas.
 
 ## Acciones y confirmación
-Leer, buscar y consultar (tu calendario, tus mails, la web…) corre solo. Piden confirmación las acciones que **envían** algo a otras personas (mandar, responder o reenviar un mail, compartir, invitar, publicar, push o merge, comentar, y crear o mover eventos con invitados) o que **borran** algo (borrar, mandar a la papelera, quitar, revocar). La regla está en `needsConfirm`, en `src/permissions.js`.
+Leer, buscar y consultar (tu calendario, tus mails, la web…) corre solo. Piden confirmación las acciones que **envían** algo a otras personas o **publican** algo: mandar, responder o reenviar un mail; compartir; invitar; publicar, push o merge; comentar; responder a una invitación de Calendar (le llega un mail al organizador); las herramientas de GitHub que escriben (crear o editar issues, pull requests, archivos, reseñas, comentarios y repositorios, hacer fork); y los eventos de Calendar con invitados (`attendees`, `attendeeEmails`, `addedAttendees` o `addedAttendeeEmails` con algo adentro). **Todo `update_event` de Calendar pide confirmación**, porque por defecto avisa por mail a todos los invitados, salvo que venga con `notificationLevel: NONE`. También piden confirmación las acciones que **borran** algo (borrar, mandar a la papelera, quitar, revocar). Crear un evento sin invitados no pide nada. La regla está en `needsConfirm`, en `src/permissions.js`.
+
+**No pongas reglas `allow` para herramientas que envían o borran en la configuración de Claude Code** (`~/.claude/settings.json`, por ejemplo `mcp__claude_ai_Gmail` o `mcp__claude_ai_Gmail__send_message`). JARVIS carga tus permisos de usuario y una regla `allow` aprueba la herramienta sin pasar por la confirmación por voz: se saltaría. El SDK no ofrece (en la versión instalada) una forma pública de leer las reglas vigentes al arrancar, así que JARVIS no puede avisarte: revisalo vos.
 
 Cuando hace falta confirmar:
 1. Te dice en una oración qué va a enviar o borrar.
 2. Aparece el panel **AUTORIZACIÓN REQUERIDA** con el detalle exacto de la acción.
 3. Te pregunta «¿Me autorizás a usar …?» y escucha tu respuesta: «sí», «dale», «confirmo» / «no», «cancelá». Si la frase trae un sí y un no a la vez, vuelve a preguntar. En el registro queda qué entendió («Escuché: …»).
-4. Si no respondés en 2 minutos, o interrumpís, la acción se rechaza.
+4. Si no respondés en 2 minutos, o interrumpís, la acción se rechaza y el panel se cierra solo («Autorización vencida» en el registro). Si recargás la página con una confirmación pendiente, el panel reaparece.
+
+Los subagentes nunca pueden confirmar: si uno intenta enviar o borrar algo, se le deniega y en el registro queda «Un subagente intentó … y se lo impedí».
 
 ## Abrir cosas en el navegador
 JARVIS puede abrir páginas en una pestaña nueva de tu navegador por defecto (herramienta propia `abrir_en_navegador`, en `src/tools/`), sin pedir confirmación porque no envía ni borra nada. Por ejemplo, si le preguntás por tus reuniones de la semana, te las resume y abre Google Calendar en la vista semanal. También sirve para «mostrame el repo», «abrime ese mail», etc. Solo abre direcciones `http`/`https`, y cada una queda anotada en el registro («Abrí: …»).
@@ -84,7 +88,7 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `JARVIS_PORT` | `7777` | Puerto local |
 | `JARVIS_MODEL` | modelo por defecto de tu cuenta | p. ej. `sonnet` o `haiku` para respuestas más rápidas |
 | `JARVIS_USER_NAME` | vacío | Tu nombre, para que JARVIS te hable por él (queda solo en tu `.env`) |
-| `JARVIS_TIMEZONE` | zona del sistema | Zona horaria IANA (p. ej. `America/Argentina/Buenos_Aires`) para la fecha y hora que ve JARVIS |
+| `JARVIS_TIMEZONE` | zona del sistema | Zona horaria IANA (p. ej. `America/Argentina/Buenos_Aires`) para la fecha y hora que ve JARVIS. Si no es válida, avisa en la consola y usa la del sistema |
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
 | `JARVIS_AGENT_<NOMBRE>_MODEL` | `haiku` (agenda), `sonnet` (correo, investigador) | Modelo de cada subagente: `AGENDA`, `CORREO` o `INVESTIGADOR` (ver [Subagentes](#subagentes-y-tareas-en-segundo-plano)) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
@@ -122,7 +126,11 @@ src/
   prompt.js          prompt de sistema y línea de fecha
   permissions.js     qué pide confirmación y la puerta de confirmaciones
   agent-options.js   opciones del Agent SDK compartidas
-  tools/             herramientas propias (navegador, YouTube)
+  session.js         la sesión viva con Claude: cola de entrada, eventos y confirmaciones
+  events.js          canal de eventos (SSE) hacia la interfaz
+  agents/            subagentes (agenda, correo, investigador) y su registro en index.js
+  tools/             herramientas propias (navegador, YouTube); se registran en index.js
+scripts/             e2e.sh: prueba de punta a punta (consume cupo)
 test/                pruebas (npm test)
 public/              interfaz web
 ```

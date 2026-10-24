@@ -176,6 +176,8 @@ class Session {
 
   confirm(id, allow) { return this.gate.confirm(id, allow); }
 
+  pendingConfirms() { return this.gate.pending(); }
+
   close() {
     this._closed = true;
     this.queue.close();

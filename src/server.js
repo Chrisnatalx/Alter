@@ -37,7 +37,8 @@ const MIME = {
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function serveStatic(req, res, token = TOKEN) {
-  const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  let urlPath;
+  try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; } // p. ej. "/%": sin token, cualquiera puede mandarlo
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const file = path.normalize(path.join(config.publicDir, rel));
   if (!file.startsWith(config.publicDir)) { res.writeHead(403).end(); return; }
@@ -105,6 +106,8 @@ function handleEvents(req, res, deps) {
   if (session) {
     deps.hub.emit('init', { sessionId: session.sessionId, ...(session.model ? { model: session.model } : {}) });
     deps.hub.emit('tasks', { tasks: session.tasks });
+    // Confirmaciones que siguen esperando respuesta: la página recién conectada no las conoce
+    for (const c of session.pendingConfirms?.() || []) deps.hub.emit('confirm', c);
   }
 }
 

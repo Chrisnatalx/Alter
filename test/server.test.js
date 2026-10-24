@@ -190,3 +190,21 @@ test('un cuerpo JSON que no es objeto (null, número, lista) da 400, no 500', as
   }
   assert.equal((await call(mkDeps(fakeSession()), 'POST', '/api/confirm', null)).status, 400);
 });
+
+test('serveStatic: una ruta mal codificada (/%) da 400 y no tira el servidor', async () => {
+  const res = fakeRes();
+  serveStatic({ url: '/%' }, res, token);
+  await res.finished;
+  assert.equal(res.status, 400);
+  const viaRoute = await call(mkDeps(fakeSession()), 'GET', '/%E0%A4%A');
+  assert.equal(viaRoute.status, 400);
+});
+
+test('GET /api/events reenvía las confirmaciones pendientes', async () => {
+  const pending = { id: 'c1', app: 'Gmail', action: 'send message', title: '', detail: '' };
+  const deps = mkDeps(fakeSession({ pendingConfirms: () => [pending] }));
+  await call(deps, 'POST', '/api/message', { text: 'hola' });
+  deps.events.length = 0;
+  await call(deps, 'GET', '/api/events');
+  assert.deepEqual(deps.events.at(-1), ['confirm', pending]);
+});

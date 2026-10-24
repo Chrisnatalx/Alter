@@ -333,6 +333,29 @@
   let taskBuffer = '';     // texto de un turno de tarea: se acumula y se dice entero al terminar
   const taskQueue = [];    // resultados de tareas esperando a que JARVIS esté libre
 
+  // Un turno de tarea terminó con una pregunta de la persona aún abierta y no llegó el turno de esa pregunta
+  // (se absorbió en el de la tarea): pasados unos segundos se da por cerrada para que no quede en PROCESANDO.
+  let foldTimer = null;
+  function armFoldTimer() {
+    clearTimeout(foldTimer);
+    foldTimer = setTimeout(() => {
+      if (!cur || activeTurn) return;
+      flushSentences(true);
+      cur = null; userBusy = false; streamDone = true;
+      $('t-link').textContent = 'ESTABLE';
+      maybeFinishSpeaking();
+    }, 3000);
+  }
+
+  // Tras cerrarse una confirmación: con un turno en curso sigue procesando; sin turno vuelve a espera y escucha
+  function leaveConfirming() {
+    if (app.state !== 'confirming') return;
+    if (activeTurn) { setState('thinking'); return; }
+    streamDone = true;
+    setState('idle');
+    if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 350);
+  }
+
   async function ask(text) {
     text = text.trim();
     if (!text) { setState('idle'); return; }
@@ -446,6 +469,7 @@
   function onEvent(ev, data) {
     switch (ev) {
       case 'turn':
+        clearTimeout(foldTimer); // llegó el turno que se esperaba: nada que cerrar a mano
         turnOrigin = data.origin;
         activeTurn = true;
         staleTurn = false; // un turno nuevo: el interrumpido ya terminó
@@ -487,8 +511,19 @@
         break;
       case 'confirm':
         if (staleTurn) break;
+        if (app.confirm?.id === data.id) break; // reenvío al reconectar de una que ya está en pantalla
         flushSentences(true); // primero termina de decir qué va a hacer
         showConfirm(data);
+        break;
+      case 'confirm_closed': // el servidor cerró la confirmación (vencida, cortada o ya respondida)
+        if (!app.confirm || app.confirm.id !== data.id) break; // ya la cerró la persona: no se repite
+        closeConfirm();
+        stopSpeaking();
+        addLog('sys', data.allowed ? 'Autorizado.' : 'Autorización vencida.');
+        leaveConfirming();
+        break;
+      case 'denied':
+        addLog('sys', `Un subagente intentó ${data.action || data.app}${data.action ? ' (' + data.app + ')' : ''} y se lo impedí.`);
         break;
       case 'task': {
         setTask(data.id, data.status, data.description);
@@ -504,7 +539,11 @@
         if (data.sessionId) { app.sessionId = data.sessionId; store.set('sessionId', app.sessionId); }
         activeTurn = false;
         if (staleTurn) { staleTurn = false; updateTelemetry(); break; } // cierre del turno que se interrumpió
-        if (turnOrigin === 'task') { const t = taskBuffer; taskBuffer = ''; turnOrigin = 'user'; queueTaskTurn(t); endIdleTurn(); break; }
+        if (turnOrigin === 'task') {
+          const t = taskBuffer; taskBuffer = ''; turnOrigin = 'user'; queueTaskTurn(t); endIdleTurn();
+          if (cur) armFoldTimer(); // un mensaje de la persona pudo quedar absorbido por este turno de tarea
+          break;
+        }
         if (data.interrupted && cur) break; // cierre tardío de un turno cortado: la pregunta vigente sigue esperando
         flushSentences(true);
         if (!data.interrupted) app.turns++;
@@ -532,8 +571,10 @@
         closeConfirm(); stopSpeaking(); taskRows.clear(); $('tasks').innerHTML = '';
         app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
         $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
-        setState('idle');
-        speak('Memoria reiniciada. Empecemos de cero.', true);
+        // Habla en estado "speaking" para que, al terminar, vuelva a espera y reabra el micrófono como siempre
+        setState('speaking');
+        dropRec();
+        speak('Memoria reiniciada. Empecemos de cero.');
         break;
     }
   }
@@ -617,8 +658,11 @@
       return;
     }
     $('t-action').textContent = allow ? 'EJECUTANDO' : 'CANCELADA';
-    setState('thinking');
-    post('/api/confirm', { id, allow }).catch((e) => console.error('No pude enviar la confirmación', e));
+    leaveConfirming(); // con turno en curso: procesando; sin turno (p. ej. ya venció): a espera
+    post('/api/confirm', { id, allow }).then((res) => {
+      // 404: el servidor ya la había cerrado (venció o se cortó). Si no hay turno, no queda nada esperando
+      if (res.status === 404) { addLog('sys', 'Autorización vencida.'); $('t-action').textContent = 'VENCIDA'; }
+    }).catch((e) => console.error('No pude enviar la confirmación', e));
   }
 
   // Devuelve true (sí), false (no) o null (no se entendió). Si la frase trae un sí y un no
@@ -853,6 +897,7 @@
   // NUEVA: el servidor cierra la sesión y avisa con `reset` (ahí se limpia la pantalla).
   // Si hay tareas en curso pide confirmar con el mismo panel y la misma escucha de sí/no.
   async function newConversation() {
+    if (app.replaced) return;
     const stale = interrupt();
     try {
       if (stale) await stale;

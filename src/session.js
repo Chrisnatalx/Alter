@@ -5,6 +5,7 @@ const { buildAgentOptions } = require('./agent-options');
 const { createPermissionGate, describeTool } = require('./permissions');
 const { createJarvisTools } = require('./tools');
 const { nowLine } = require('./prompt');
+const crypto = require('crypto');
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -22,18 +23,23 @@ function createInputQueue() {
     }
   }
   return {
+    // Devuelve el uuid del mensaje (el SDK lo respeta y permite cancelarlo por él), o null si ya está cerrada
     push(text) {
-      if (closed) return;
-      items.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: '' });
+      if (closed) return null;
+      const uuid = crypto.randomUUID();
+      items.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: '', uuid });
       notify();
+      return uuid;
     },
+    // Descarta lo que todavía no se le entregó al SDK; devuelve los uuid descartados
+    clear() { return items.splice(0).map((i) => i.uuid); },
     close() { closed = true; notify(); },
     iterable: iterate(),
   };
 }
 
 function createState() {
-  return { userSince: false, taskSince: false, interrupting: false, turnActive: false, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
+  return { userSince: false, taskSince: false, interrupting: false, turnActive: false, turnOrigin: null, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
 }
 
 // Traduce un mensaje del SDK a eventos para la interfaz. Pura salvo por `state`, que se muta.
@@ -46,6 +52,7 @@ function mapMessage(msg, state) {
         state.taskSince = false;
         state.turnStartedAt = Date.now();
         state.turnActive = true; // hay un turno en curso hasta que llegue su result
+        state.turnOrigin = origin;
         state.sessionId = msg.session_id;
         state.model = msg.model;
         return [['turn', { origin }], ['init', { sessionId: msg.session_id, model: msg.model }]];
@@ -92,6 +99,7 @@ class Session {
     this.tools = createJarvisTools(sdk, { emit, googleAccount: config.googleAccount });
     this.q = null;
     this._closed = false;
+    this.pushed = []; // uuid de mensajes enviados desde el último turno de la persona: pueden seguir en cola
   }
 
   get sessionId() { return this.state.sessionId; }
@@ -116,6 +124,7 @@ class Session {
       for await (const msg of this.q) {
         // Con la sesión cerrada (p. ej. tras NUEVA) lo que aún llega es viejo: se procesa pero no se emite
         const events = mapMessage(msg, this.state);
+        if (msg.type === 'system' && msg.subtype === 'init' && this.state.turnOrigin === 'user') this.pushed = [];
         if (!this._closed) for (const [event, data] of events) this.emit(event, data);
       }
       if (!this._closed) this.emit('error', { message: 'La sesión terminó inesperadamente.' });
@@ -129,16 +138,31 @@ class Session {
 
   send(text) {
     this.state.userSince = true;
-    this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${text}`);
+    const uuid = this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${text}`);
+    if (uuid) this.pushed.push(uuid);
+    return uuid;
   }
 
-  // Corta solo el turno actual: las tareas en segundo plano siguen.
+  // Corta el turno actual de la persona y descarta sus mensajes en cola (el SDK los juntaría en el turno
+  // siguiente y se respondería algo ya cancelado). Las tareas en segundo plano siguen.
   async interrupt() {
     this.gate.denyAll();
+    const local = this.queue.clear(); // lo que no salió hacia el SDK no debe salir nunca
+    this.pushed = this.pushed.filter((id) => !local.includes(id));
     if (!this.q) return;
+    this.state.userSince = false; // lo que esperaba su turno se descartó: el próximo turno no es de la persona
+    if (this.state.turnActive && this.state.turnOrigin === 'task') {
+      // Un turno de tarea no se aborta: solo se cancelan los mensajes ya enviados que esperan detrás.
+      // Un uuid que ya se consumió o no existe rechaza la cancelación: no importa.
+      const ids = this.pushed.splice(0);
+      await Promise.all(ids.map((id) => Promise.resolve().then(() => this.q.cancelAsyncMessage(id)).catch(() => {})));
+      return;
+    }
     // Sin turno en curso no hay nada que cortar: marcar la bandera haría pasar un error real por interrupción
     if (this.state.turnActive) this.state.interrupting = true;
-    try { await this.q.interrupt(); } catch (err) { this.state.interrupting = false; throw err; }
+    this.pushed = [];
+    // `cancelQueued` existe en sdk.mjs (capacidad interrupt_cancel_queued_v1 en system/init) pero falta en sdk.d.ts
+    try { await this.q.interrupt({ cancelQueued: true }); } catch (err) { this.state.interrupting = false; throw err; }
   }
 
   async stopTask(taskId) { await this.q?.stopTask(taskId); }

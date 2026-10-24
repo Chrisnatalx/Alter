@@ -304,7 +304,7 @@
   let cur = null;
   let userBusy = false;    // el servidor está respondiendo a la persona (interrumpible)
   let turnOrigin = 'user'; // quién arrancó el turno que está llegando por el canal
-  const asks = createAskTracker(); // mensajes enviados cuyo turno no empezó / cancelados antes de empezar
+  let askSeq = 0;          // sube con cada ask() e interrupt(): un ask viejo no manda su mensaje si lo cortaron antes
   let staleTurn = false;   // tras interrumpir se ignora lo que llegue hasta que empiece un turno nuevo
   let taskBuffer = '';     // texto de un turno de tarea: se acumula y se dice entero al terminar
   const taskQueue = [];    // resultados de tareas esperando a que JARVIS esté libre
@@ -314,12 +314,12 @@
     if (!text) { setState('idle'); return; }
     if (app.replaced) return;
     const stale = interrupt();
-    asks.sent();
+    const seq = ++askSeq;
     spoken = new Set();
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
     addLog('user', text);
-    cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
+    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
     userBusy = true;
     setState('thinking');
     $('t-link').textContent = 'TRANSMITIENDO';
@@ -330,11 +330,12 @@
 
     try {
       if (stale) await stale; // que el corte llegue al servidor antes que el mensaje nuevo
+      if (seq !== askSeq) return; // ESC o una pregunta nueva mientras esperaba el corte: este mensaje ya no se manda
+      cur = turn; // recién ahora: lo que llegue del turno cortado no se pinta como respuesta nueva
       const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok) throw new Error('El servidor respondió ' + res.status);
     } catch (err) {
-      asks.failed();
       failTurn(err.message);
     }
   }
@@ -378,13 +379,12 @@
 
   // Corta la voz local y, si el servidor está respondiendo, también esa respuesta.
   // Devuelve la promesa del POST (o null) para que ask() espere antes de mandar lo nuevo.
-  function interrupt() {
+  function interrupt(localOnly = false) {
     let sent = null;
-    asks.cancel(); // lo enviado cuyo turno aún no empezó se descarta cuando llegue
-    if (userBusy && turnOrigin !== 'task') { // un turno de tarea en segundo plano no se corta al hablar
-      staleTurn = true;
-      sent = post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
-    }
+    askSeq++;
+    // El servidor decide qué cortar: el turno de la persona y sus mensajes en cola; un turno de tarea sigue
+    if (!localOnly) sent = post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
+    if (userBusy && turnOrigin !== 'task') staleTurn = true; // lo que siga de ese turno se ignora
     cur = null; userBusy = false;
     closeConfirm();
     stopSpeaking();
@@ -422,21 +422,9 @@
       case 'turn':
         turnOrigin = data.origin;
         if (data.origin === 'task') { staleTurn = false; taskBuffer = ''; break; }
-        if (asks.started() === 'drop') { // respuesta a un mensaje cancelado: se corta ahora que empezó
-          staleTurn = true;
-          post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
-          break;
-        }
-        staleTurn = false;
-        if (!cur) { // turno de la persona sin un ask pendiente: se trata como una respuesta normal
-          dropRec();
-          spoken = new Set();
-          $('sub-ai').textContent = '';
-          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
-          userBusy = true; streamDone = false;
-          setState('thinking');
-          $('t-link').textContent = 'TRANSMITIENDO';
-        }
+        // `cur` solo existe si la persona preguntó y no interrumpió desde entonces: sin él, este turno es de un
+        // mensaje cancelado (o ajeno) y no se pinta ni se habla.
+        staleTurn = !cur;
         break;
       case 'init': // el servidor lo repite en cada turno
         $('t-model').textContent = (data.model || '—').replace(/^claude-/, '').toUpperCase();
@@ -493,7 +481,7 @@
         failTurn(data.message);
         break;
       case 'replaced': // otra ventana tomó el canal: esta se calla y no reconecta
-        app.replaced = true; taskQueue.length = 0; asks.reset();
+        app.replaced = true; taskQueue.length = 0
         dropRec(); closeConfirm(); stopSpeaking();
         cur = null; userBusy = false; streamDone = true;
         $('replaced').hidden = false;
@@ -501,7 +489,7 @@
         setState('idle');
         break;
       case 'reset':
-        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; asks.reset();
+        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0;
         closeConfirm(); stopSpeaking();
         app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
         $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
@@ -552,7 +540,7 @@
       // Se cortó: si había un turno en curso no va a llegar su final
       if (cur || userBusy) failTurn('Se cortó el canal con el servidor.');
       $('t-link').textContent = 'RECONECTANDO';
-      staleTurn = false; asks.reset(); // lo pendiente se perdió con el canal
+      staleTurn = false;
       await new Promise((r) => setTimeout(r, Math.min(10000, 1000 * 2 ** fails++))); // 1, 2, 4, 8, 10 s
     }
   }
@@ -664,7 +652,7 @@
     if (!SR) { $('sub-ai').textContent = 'Este navegador no soporta reconocimiento de voz. Usá Chrome o Edge, o escribí abajo.'; return; }
     if (app.state === 'listening') return;
     stopBargeIn();
-    interrupt(); // hablar encima de JARVIS lo interrumpe
+    interrupt(true); // hablar encima de JARVIS lo interrumpe
     ensureMicMeter();
     heard = '';
     rec = new SR();

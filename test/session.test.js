@@ -13,7 +13,9 @@ test('createInputQueue entrega en orden lo enviado antes y después de iterar', 
   q.push('b');
   const it = q.iterable[Symbol.asyncIterator]();
   assert.equal((await it.next()).value.message.content, 'a');
-  assert.deepEqual((await it.next()).value, { type: 'user', message: { role: 'user', content: 'b' }, parent_tool_use_id: null, session_id: '' });
+  const b = (await it.next()).value;
+  assert.match(b.uuid, /^[0-9a-f-]{36}$/); // el uuid permite cancelar el mensaje en el SDK
+  assert.deepEqual({ ...b, uuid: undefined }, { type: 'user', message: { role: 'user', content: 'b' }, parent_tool_use_id: null, session_id: '', uuid: undefined });
   const pending = it.next();
   q.push('c');
   assert.equal((await pending).value.message.content, 'c');
@@ -79,14 +81,15 @@ test('mapMessage: result interrumpido, otros errores y limpieza de la bandera', 
 
 // query falsa: emite el guion y queda viva hasta close(), con espías en interrupt/stopTask/close
 function fakeQuery(script = []) {
-  const calls = { interrupt: 0, stopTask: [], close: 0, args: null };
+  const calls = { interrupt: 0, interruptArgs: [], cancelled: [], stopTask: [], close: 0, args: null };
   let release;
   const gate = new Promise((r) => { release = r; });
   const queryFn = (args) => {
     calls.args = args;
     return {
       async *[Symbol.asyncIterator]() { for (const m of script) yield m; await gate; },
-      async interrupt() { calls.interrupt++; },
+      async interrupt(opts) { calls.interrupt++; calls.interruptArgs.push(opts); },
+      async cancelAsyncMessage(id) { calls.cancelled.push(id); },
       async stopTask(id) { calls.stopTask.push(id); },
       close() { calls.close++; release(); },
     };
@@ -250,4 +253,67 @@ test('con la sesión cerrada no emite los mensajes que siguen llegando', async (
   release();
   await tick();
   assert.deepEqual(events.map(([e]) => e), ['turn', 'init']); // nada después del cierre, ni siquiera un error
+});
+
+const taskInit = { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'listo' };
+
+test('interrupt en turno de la persona: corta con cancelQueued y descarta la cola sin entregar', async () => {
+  const { queryFn, calls } = fakeQuery([init]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  s.send('a'); // el SDK falso no consume la cola: queda sin entregar
+  s.send('b');
+  await tick();
+  await s.interrupt();
+  assert.deepEqual(calls.interruptArgs, [{ cancelQueued: true }]);
+  assert.deepEqual(calls.cancelled, []);
+  assert.equal(s.state.interrupting, true); // había un turno activo
+  assert.deepEqual(s.pushed, []);
+  assert.equal(s.state.userSince, false);
+  s.queue.close();
+  assert.equal((await s.queue.iterable[Symbol.asyncIterator]().next()).done, true); // nada que entregar
+  s.close();
+});
+
+test('interrupt en turno de tarea: no aborta, cancela por uuid los mensajes recordados', async () => {
+  const { queryFn, calls } = fakeQuery([taskInit, init]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  assert.equal(s.state.turnOrigin, 'task');
+  const u1 = s.send('a');
+  const u2 = s.send('b');
+  const it = s.queue.iterable[Symbol.asyncIterator]();
+  await it.next(); await it.next(); // el SDK ya tomó los dos: solo se pueden cancelar por uuid
+  await s.interrupt();
+  assert.equal(calls.interrupt, 0);
+  assert.deepEqual(calls.cancelled, [u1, u2]);
+  assert.equal(s.state.interrupting, false);
+  assert.deepEqual(s.pushed, []);
+  s.close();
+});
+
+test('interrupt en turno de tarea ignora el rechazo de un uuid ya consumido', async () => {
+  const { queryFn, calls } = fakeQuery([taskInit, init]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  s.q.cancelAsyncMessage = async () => { throw new Error('ya consumido'); };
+  s.send('a');
+  await s.queue.iterable[Symbol.asyncIterator]().next();
+  await s.interrupt(); // no lanza
+  assert.equal(calls.interrupt, 0);
+  s.close();
+});
+
+test('los uuid recordados se olvidan cuando arranca un turno de la persona', async () => {
+  const { queryFn } = fakeQuery([init]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.send('a'); // antes de arrancar: el primer init es de la persona
+  assert.equal(s.pushed.length, 1);
+  s.start({});
+  await tick();
+  assert.equal(s.state.turnOrigin, 'user');
+  assert.deepEqual(s.pushed, []);
+  s.close();
 });

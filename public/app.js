@@ -15,6 +15,9 @@
   const STATE_LABEL = { boot: 'INICIANDO', idle: 'EN ESPERA', listening: 'ESCUCHANDO', thinking: 'PROCESANDO', speaking: 'TRANSMITIENDO', confirming: 'AUTORIZACIÓN' };
   // Token que el servidor inyecta en la página; sin él la API rechaza los pedidos.
   const TOKEN = document.querySelector('meta[name="jarvis-token"]')?.content || '';
+  // El servidor reemplaza el marcador por el nombre; si no lo hizo (o está vacío), saluda sin nombre
+  const USER_RAW = document.querySelector('meta[name="jarvis-user"]')?.content || '';
+  const USER = USER_RAW === '__JARVIS_USER__' ? '' : USER_RAW;
 
   const app = {
     state: 'boot',
@@ -683,7 +686,7 @@
     ['Protocolos de personalidad', 'OK'],
   ];
 
-  const GREETING = 'Hola Nata, ¿cómo estás?';
+  const GREETING = `Hola${USER ? ' ' + USER : ''}, ¿cómo estás?`;
 
   async function boot() {
     syncButtons(); updateTelemetry();

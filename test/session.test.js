@@ -178,3 +178,59 @@ test('si la query lanza, emite error con el mensaje', async () => {
   assert.deepEqual(events, [['error', { message: 'boom' }]]);
   assert.equal(s.closed, true);
 });
+
+test('interrupt sin turno activo no deja la bandera: un error posterior no es "interrumpido"', async () => {
+  const { queryFn } = fakeQuery([]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await s.interrupt(); // no hay turno en curso
+  assert.equal(s.state.interrupting, false);
+  s.close();
+});
+
+test('interrupt con turno activo marca la bandera y result la limpia', async () => {
+  const { queryFn } = fakeQuery([init]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  assert.equal(s.state.turnActive, true);
+  await s.interrupt();
+  assert.equal(s.state.interrupting, true);
+  mapMessage(success, s.state);
+  assert.equal(s.state.turnActive, false);
+  assert.equal(s.state.interrupting, false);
+  s.close();
+});
+
+test('si q.interrupt rechaza, la bandera se limpia', async () => {
+  const queryFn = () => ({
+    async *[Symbol.asyncIterator]() { yield init; await new Promise(() => {}); },
+    async interrupt() { throw new Error('no'); },
+    close() {},
+  });
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  await assert.rejects(s.interrupt(), /no/);
+  assert.equal(s.state.interrupting, false);
+});
+
+test('si la query termina sola, la cola de entrada se cierra', async () => {
+  const queryFn = () => ({ async *[Symbol.asyncIterator]() { throw new Error('boom'); } });
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  s.send('tarde'); // no debe quedar encolado
+  const it = s.queue.iterable[Symbol.asyncIterator]();
+  assert.equal((await it.next()).done, true);
+});
+
+test('getters tasks y model reflejan el estado', async () => {
+  const { queryFn } = fakeQuery([init, { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', description: 'd', subagent_type: 'a' }] }]);
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  assert.equal(s.model, 'haiku');
+  assert.deepEqual(s.tasks, [{ id: 't1', description: 'd', agent: 'a' }]);
+  s.close();
+});

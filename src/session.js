@@ -33,7 +33,7 @@ function createInputQueue() {
 }
 
 function createState() {
-  return { userSince: false, taskSince: false, interrupting: false, turnStartedAt: 0, sessionId: null, tasks: [] };
+  return { userSince: false, taskSince: false, interrupting: false, turnActive: false, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
 }
 
 // Traduce un mensaje del SDK a eventos para la interfaz. Pura salvo por `state`, que se muta.
@@ -45,7 +45,9 @@ function mapMessage(msg, state) {
         state.userSince = false;
         state.taskSince = false;
         state.turnStartedAt = Date.now();
+        state.turnActive = true; // hay un turno en curso hasta que llegue su result
         state.sessionId = msg.session_id;
+        state.model = msg.model;
         return [['turn', { origin }], ['init', { sessionId: msg.session_id, model: msg.model }]];
       }
       case 'task_started':
@@ -70,6 +72,7 @@ function mapMessage(msg, state) {
   if (msg.type === 'result') {
     const interrupting = state.interrupting;
     state.interrupting = false;
+    state.turnActive = false;
     const sessionId = msg.session_id || state.sessionId;
     if (msg.subtype === 'success' && !msg.is_error) return [['done', { sessionId, ms: Date.now() - state.turnStartedAt }]];
     if (msg.subtype === 'error_during_execution' && interrupting) return [['done', { sessionId, interrupted: true }]];
@@ -93,6 +96,8 @@ class Session {
 
   get sessionId() { return this.state.sessionId; }
   get closed() { return this._closed; }
+  get model() { return this.state.model; }
+  get tasks() { return this.state.tasks; }
 
   start({ resumeId } = {}) {
     if (this.q) return;
@@ -116,6 +121,7 @@ class Session {
       if (!this._closed) this.emit('error', { message: err.message || String(err) });
     }
     this._closed = true; // el servidor crea una sesión nueva cuando esta ya no sirve
+    this.queue.close(); // y un send() tardío no queda encolado hacia nadie
     this.gate.denyAll();
   }
 
@@ -128,8 +134,9 @@ class Session {
   async interrupt() {
     this.gate.denyAll();
     if (!this.q) return;
-    this.state.interrupting = true;
-    await this.q.interrupt();
+    // Sin turno en curso no hay nada que cortar: marcar la bandera haría pasar un error real por interrupción
+    if (this.state.turnActive) this.state.interrupting = true;
+    try { await this.q.interrupt(); } catch (err) { this.state.interrupting = false; throw err; }
   }
 
   async stopTask(taskId) { await this.q?.stopTask(taskId); }

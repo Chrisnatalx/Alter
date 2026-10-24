@@ -33,9 +33,11 @@ npm link
 ### 5. Tu configuración (opcional)
 Copiá `.env.example` como `.env` y completá lo que necesites. Las variables están explicadas en [Configuración](#configuración). Lo más común es esto:
 ```
+JARVIS_USER_NAME=Tu nombre
+JARVIS_TIMEZONE=America/Argentina/Buenos_Aires
 JARVIS_GOOGLE_ACCOUNT=tu-mail@ejemplo.com
 ```
-Sirve si tenés varias cuentas de Google en el navegador, para que Calendar y Gmail se abran en la correcta. El `.env` es tuyo y no se sube al repo.
+`JARVIS_USER_NAME` es cómo te llama JARVIS y `JARVIS_TIMEZONE` define su fecha y hora (si la omitís usa la de tu sistema). `JARVIS_GOOGLE_ACCOUNT` sirve si tenés varias cuentas de Google en el navegador, para que Calendar y Gmail se abran en la correcta. El `.env` es tuyo y no se sube al repo.
 
 ### 6. Arrancar
 Corré `jarvis`, permití el micrófono cuando el navegador lo pida y hablale.
@@ -57,7 +59,7 @@ Levanta el servidor y abre la interfaz. Si ya estaba corriendo, solo abre la ven
 - Voz, velocidad y tono se ajustan en el panel izquierdo. En Edge aparecen voces "Natural" más realistas.
 
 ## Acciones y confirmación
-Leer, buscar y consultar (tu calendario, tus mails, la web…) corre solo. Piden confirmación las acciones que **envían** algo a otras personas (mandar, responder o reenviar un mail, compartir, invitar, publicar, push o merge, comentar, y crear o mover eventos con invitados) o que **borran** algo (borrar, mandar a la papelera, quitar, revocar). La regla está en `needsConfirm` dentro de `server.js`.
+Leer, buscar y consultar (tu calendario, tus mails, la web…) corre solo. Piden confirmación las acciones que **envían** algo a otras personas (mandar, responder o reenviar un mail, compartir, invitar, publicar, push o merge, comentar, y crear o mover eventos con invitados) o que **borran** algo (borrar, mandar a la papelera, quitar, revocar). La regla está en `needsConfirm`, en `src/permissions.js`.
 
 Cuando hace falta confirmar:
 1. Te dice en una oración qué va a enviar o borrar.
@@ -66,7 +68,7 @@ Cuando hace falta confirmar:
 4. Si no respondés en 2 minutos, o interrumpís, la acción se rechaza.
 
 ## Abrir cosas en el navegador
-JARVIS puede abrir páginas en una pestaña nueva de tu navegador por defecto (herramienta propia `abrir_en_navegador`, en `server.js`), sin pedir confirmación porque no envía ni borra nada. Por ejemplo, si le preguntás por tus reuniones de la semana, te las resume y abre Google Calendar en la vista semanal. También sirve para «mostrame el repo», «abrime ese mail», etc. Solo abre direcciones `http`/`https`, y cada una queda anotada en el registro («Abrí: …»).
+JARVIS puede abrir páginas en una pestaña nueva de tu navegador por defecto (herramienta propia `abrir_en_navegador`, en `src/tools/`), sin pedir confirmación porque no envía ni borra nada. Por ejemplo, si le preguntás por tus reuniones de la semana, te las resume y abre Google Calendar en la vista semanal. También sirve para «mostrame el repo», «abrime ese mail», etc. Solo abre direcciones `http`/`https`, y cada una queda anotada en el registro («Abrí: …»).
 
 **Música**: «poné X en YouTube» busca y abre el primer video (herramienta `poner_en_youtube`; lee la página de resultados, sin API key; si no logra identificar el video, abre la búsqueda). Al hacerlo **se apaga el micrófono**, para que la música no se tome como si le hablaras: tocá **ESPACIO** para volver a hablarle. JARVIS no controla la pestaña después de abrirla (pausar o cambiar de tema se hace a mano).
 
@@ -79,6 +81,8 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 |---|---|---|
 | `JARVIS_PORT` | `7777` | Puerto local |
 | `JARVIS_MODEL` | modelo por defecto de tu cuenta | p. ej. `sonnet` o `haiku` para respuestas más rápidas |
+| `JARVIS_USER_NAME` | vacío | Tu nombre, para que JARVIS te hable por él (queda solo en tu `.env`) |
+| `JARVIS_TIMEZONE` | zona del sistema | Zona horaria IANA (p. ej. `America/Argentina/Buenos_Aires`) para la fecha y hora que ve JARVIS |
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
 
@@ -86,4 +90,18 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 - El servidor solo escucha en `127.0.0.1` y exige un token que se genera en cada arranque y solo conoce la página de JARVIS: otra web abierta en tu navegador no puede mandarle órdenes ni confirmar acciones. Si reiniciás el servidor, recargá la página (F5).
 - Cada mensaje consume de tu cupo de Claude.
 - El reconocimiento de voz del navegador procesa el audio en servidores de Google (Chrome) o Microsoft (Edge).
-- La personalidad se define en `SYSTEM_PROMPT` dentro de `server.js`.
+- La personalidad se define en `src/prompt.js`.
+
+## Estructura del código
+```
+server.js            punto de entrada (reexporta src/server.js; lo usa bin/jarvis.js)
+src/
+  server.js          servidor HTTP: interfaz, /api/chat (SSE) y /api/confirm
+  config.js          configuración leída del entorno (.env)
+  prompt.js          prompt de sistema y línea de fecha
+  permissions.js     qué pide confirmación y la puerta de confirmaciones
+  agent-options.js   opciones del Agent SDK compartidas
+  tools/             herramientas propias (navegador, YouTube)
+test/                pruebas (npm test)
+public/              interfaz web
+```

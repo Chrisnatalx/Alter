@@ -14,6 +14,7 @@ function buildAgentOptions({ config, canUseTool, mcpServers, abortController }) 
     tools: ['WebSearch', 'WebFetch'],    // de las herramientas internas, solo web: nada de terminal ni archivos
     permissionMode: 'default',           // todo lo que no esté preaprobado pasa por canUseTool
     canUseTool,
+    perTaskStopAffordance: true,         // interrupt() corta solo el turno actual; las tareas en segundo plano siguen
   };
   if (abortController) options.abortController = abortController;
   if (config.claudeBin) options.pathToClaudeCodeExecutable = config.claudeBin;

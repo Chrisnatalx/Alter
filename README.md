@@ -86,7 +86,25 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `JARVIS_USER_NAME` | vacío | Tu nombre, para que JARVIS te hable por él (queda solo en tu `.env`) |
 | `JARVIS_TIMEZONE` | zona del sistema | Zona horaria IANA (p. ej. `America/Argentina/Buenos_Aires`) para la fecha y hora que ve JARVIS |
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
+| `JARVIS_AGENT_<NOMBRE>_MODEL` | `haiku` (agenda), `sonnet` (correo, investigador) | Modelo de cada subagente: `AGENDA`, `CORREO` o `INVESTIGADOR` (ver [Subagentes](#subagentes-y-tareas-en-segundo-plano)) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
+
+## Subagentes y tareas en segundo plano
+JARVIS puede delegar trabajo en subagentes (definidos en `src/agents/`). Los tres son de solo lectura o de preparación: **no envían ni borran nada**. Lo que envía o borra lo hace JARVIS mismo, y pide tu confirmación.
+
+| Subagente | Qué hace | Modelo por defecto | Variable para cambiarlo |
+|---|---|---|---|
+| `agenda` | Consulta Google Calendar: reuniones de un día o una semana, huecos libres, propuestas de horario. Solo lee. | `haiku` | `JARVIS_AGENT_AGENDA_MODEL` |
+| `correo` | Busca y lee Gmail, resume hilos y deja borradores. No envía. | `sonnet` | `JARVIS_AGENT_CORREO_MODEL` |
+| `investigador` | Búsquedas y lecturas web largas. **Corre en segundo plano**. | `sonnet` | `JARVIS_AGENT_INVESTIGADOR_MODEL` |
+
+Para cambiar el modelo de uno, poné la variable en tu `.env` (por ejemplo `JARVIS_AGENT_AGENDA_MODEL=sonnet`) y reiniciá JARVIS.
+
+- **Tareas en segundo plano**: mientras el investigador trabaja podés seguir hablando. Las tareas en curso aparecen en el panel, donde se pueden cancelar. Cuando una termina, JARVIS te lo cuenta apenas no estés hablando con él.
+- **Reiniciar el servidor (o NUEVA con confirmación) cancela las tareas en curso**: no sobreviven a un reinicio.
+- **Agregar un subagente**: creá un archivo en `src/agents/` que exporte `name`, `description`, `prompt`, `tools` (solo las herramientas que necesita), `model` y `maxTurns` (y `background: true` si debe correr en segundo plano), y registralo en la lista de `src/agents/index.js`. Su modelo se podrá cambiar con `JARVIS_AGENT_<NOMBRE>_MODEL`. Un subagente no debería tener herramientas que envíen o borren.
+- **Agregar una herramienta propia**: definila en un archivo de `src/tools/` (con `sdk.tool(...)`) y registrala en `src/tools/index.js`.
+- **Prueba de punta a punta**: `scripts/e2e.sh` levanta el servidor en el puerto 7788 y manda mensajes de prueba (con argumentos, manda esos mensajes). **Consume cupo de tu cuenta y puede abrir pestañas**; rechaza toda confirmación, pero usa tus conectores reales, así que revisá los mensajes antes de correrlo.
 
 ## Seguridad y privacidad
 - El servidor solo escucha en `127.0.0.1` y exige un token que se genera en cada arranque y solo conoce la página de JARVIS: otra web abierta en tu navegador no puede mandarle órdenes ni confirmar acciones. Si reiniciás el servidor, recargá la página (F5). La página se reconecta sola si el canal de eventos se corta, salvo que el token ya no valga (ahí pide F5).

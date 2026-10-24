@@ -5,7 +5,8 @@
   "description": "Interfaz de voz futurista para conversar con Claude usando tu suscripción (vía Claude Code).",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20.12"

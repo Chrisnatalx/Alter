@@ -304,6 +304,7 @@
   let cur = null;
   let userBusy = false;    // el servidor está respondiendo a la persona (interrumpible)
   let turnOrigin = 'user'; // quién arrancó el turno que está llegando por el canal
+  const asks = createAskTracker(); // mensajes enviados cuyo turno no empezó / cancelados antes de empezar
   let staleTurn = false;   // tras interrumpir se ignora lo que llegue hasta que empiece un turno nuevo
   let taskBuffer = '';     // texto de un turno de tarea: se acumula y se dice entero al terminar
   const taskQueue = [];    // resultados de tareas esperando a que JARVIS esté libre
@@ -313,6 +314,7 @@
     if (!text) { setState('idle'); return; }
     if (app.replaced) return;
     const stale = interrupt();
+    asks.sent();
     spoken = new Set();
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
@@ -332,6 +334,7 @@
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok) throw new Error('El servidor respondió ' + res.status);
     } catch (err) {
+      asks.failed();
       failTurn(err.message);
     }
   }
@@ -377,6 +380,7 @@
   // Devuelve la promesa del POST (o null) para que ask() espere antes de mandar lo nuevo.
   function interrupt() {
     let sent = null;
+    asks.cancel(); // lo enviado cuyo turno aún no empezó se descarta cuando llegue
     if (userBusy && turnOrigin !== 'task') { // un turno de tarea en segundo plano no se corta al hablar
       staleTurn = true;
       sent = post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
@@ -416,9 +420,14 @@
   function onEvent(ev, data) {
     switch (ev) {
       case 'turn':
-        staleTurn = false;
         turnOrigin = data.origin;
-        if (data.origin === 'task') { taskBuffer = ''; break; }
+        if (data.origin === 'task') { staleTurn = false; taskBuffer = ''; break; }
+        if (asks.started() === 'drop') { // respuesta a un mensaje cancelado: se corta ahora que empezó
+          staleTurn = true;
+          post('/api/interrupt').catch((e) => console.error('No pude interrumpir', e));
+          break;
+        }
+        staleTurn = false;
         if (!cur) { // turno de la persona sin un ask pendiente: se trata como una respuesta normal
           dropRec();
           spoken = new Set();
@@ -484,7 +493,7 @@
         failTurn(data.message);
         break;
       case 'replaced': // otra ventana tomó el canal: esta se calla y no reconecta
-        app.replaced = true; taskQueue.length = 0;
+        app.replaced = true; taskQueue.length = 0; asks.reset();
         dropRec(); closeConfirm(); stopSpeaking();
         cur = null; userBusy = false; streamDone = true;
         $('replaced').hidden = false;
@@ -492,7 +501,7 @@
         setState('idle');
         break;
       case 'reset':
-        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0;
+        cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; asks.reset();
         closeConfirm(); stopSpeaking();
         app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
         $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
@@ -543,7 +552,7 @@
       // Se cortó: si había un turno en curso no va a llegar su final
       if (cur || userBusy) failTurn('Se cortó el canal con el servidor.');
       $('t-link').textContent = 'RECONECTANDO';
-      staleTurn = false;
+      staleTurn = false; asks.reset(); // lo pendiente se perdió con el canal
       await new Promise((r) => setTimeout(r, Math.min(10000, 1000 * 2 ** fails++))); // 1, 2, 4, 8, 10 s
     }
   }

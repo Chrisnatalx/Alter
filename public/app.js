@@ -556,6 +556,10 @@
     return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
   }
 
+  // Diagnóstico del micrófono: abrir con ?debug para ver en el registro qué oye y por qué corta o no.
+  const DEBUG = new URLSearchParams(location.search).has('debug');
+  function dbg(msg) { if (DEBUG) { console.log('[mic]', msg); addLog('sys', '[mic] ' + msg); } }
+
   function startBargeIn() {
     if (!SR || !app.micOn || rec || app.state !== 'speaking') return;
     let cut = false;
@@ -569,7 +573,12 @@
       const w = words(Array.from(e.results).map((x) => x[0].transcript).join(' '));
       if (!cut) {
         const foreign = w.filter((x) => !spoken.has(x));
-        if (foreign.length < BARGE_MIN_WORDS && !foreign.some((x) => STOP_WORDS.includes(x))) return;
+        const isFinal = e.results[e.results.length - 1].isFinal;
+        if (foreign.length < BARGE_MIN_WORDS && !foreign.some((x) => STOP_WORDS.includes(x))) {
+          if (isFinal) dbg(`ignoro «${w.join(' ')}» · nuevas: [${foreign.join(', ')}]`);
+          return;
+        }
+        dbg(`CORTO con «${w.join(' ')}» · nuevas: [${foreign.join(', ')}]`);
         cut = true;
         interrupt(); // corta la voz y la respuesta en curso
         setState('listening');
@@ -579,15 +588,17 @@
       heard = w.slice(i).join(' ');
       $('sub-user').textContent = heard;
     };
+    r.onerror = (e) => { if (e.error !== 'aborted') dbg(`error de escucha: ${e.error}`); };
     r.onend = () => {
       if (rec === r) rec = null;
+      dbg(`fin de escucha (estado: ${app.state}${cut ? ', interrumpido' : ''})`);
       if (cut) {
         if (app.state !== 'listening') return;
         if (heard) ask(heard);
         else { setState('idle'); if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 250); }
       } else if (app.state === 'speaking') setTimeout(startBargeIn, 100); // sigue hablando: seguir atento
     };
-    try { r.start(); } catch { rec = null; }
+    try { r.start(); dbg('escucho mientras hablo'); } catch { rec = null; }
   }
 
   function stopBargeIn() {

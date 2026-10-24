@@ -2,6 +2,7 @@
 // en segundo plano arranquen a Claude con la misma configuración.
 
 const { buildSystemPrompt } = require('./prompt');
+const { buildAgents } = require('./agents');
 
 function buildAgentOptions({ config, canUseTool, mcpServers, abortController }) {
   const options = {
@@ -11,7 +12,8 @@ function buildAgentOptions({ config, canUseTool, mcpServers, abortController }) 
     systemPrompt: buildSystemPrompt({ userName: config.userName }),
     settingSources: ['user'],            // tus plugins y conectores…
     settings: { disableAllHooks: true, autoMemoryEnabled: false }, // …sin hooks ni memoria de archivos
-    tools: ['WebSearch', 'WebFetch'],    // de las herramientas internas, solo web: nada de terminal ni archivos
+    tools: ['WebSearch', 'WebFetch', 'Agent'], // de las herramientas internas, solo web y delegar: nada de terminal ni archivos
+    agents: buildAgents(config),         // subagentes: agenda, correo e investigador
     permissionMode: 'default',           // todo lo que no esté preaprobado pasa por canUseTool
     canUseTool,
     perTaskStopAffordance: true,         // interrupt() corta solo el turno actual; las tareas en segundo plano siguen

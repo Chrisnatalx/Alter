@@ -4,20 +4,41 @@ Interfaz de voz futurista para conversar con Claude usando **tu suscripción**. 
 
 JARVIS tiene acceso a tus **conectores y plugins** (Gmail, Google Calendar, Drive, GitHub, etc.) y a búsqueda web. Lee y busca sin preguntar; **solo te pide confirmación antes de enviar o borrar algo**, por voz («sí» / «no») o con un botón.
 
-## Requisitos
-- Node 18 o superior
-- Claude Code instalado y con sesión iniciada (corré `claude` una vez y hacé login)
-- Chrome o Edge (el reconocimiento de voz no funciona en Firefox)
+## Puesta en marcha, paso a paso
+JARVIS usa **tu** cuenta de Claude y **tus** conectores: cada persona lo configura con lo suyo, y en el repo no queda ningún dato personal.
 
-## Instalación (en cualquier PC)
+### 1. Instalar lo necesario
+- **Node 20.12 o superior** ([nodejs.org](https://nodejs.org)). Comprobalo con `node -v`.
+- **Chrome o Edge**. El reconocimiento de voz no funciona en Firefox.
+- **Claude Code**: `npm install -g @anthropic-ai/claude-code`
+- Una **suscripción de Claude** (Pro o Max). JARVIS consume de tu cupo.
+
+### 2. Iniciar sesión en Claude Code
+Abrí una terminal, corré `claude` y hacé login con tu cuenta de claude.ai. Alcanza con hacerlo una vez; JARVIS reutiliza esa sesión.
+
+### 3. Conectar tus apps (Gmail, Calendar, Drive…)
+JARVIS usa los conectores de tu cuenta de claude.ai. En [claude.ai](https://claude.ai) andá a **Configuración → Conectores** y conectá los que quieras usar, por ejemplo Gmail, Google Calendar, Google Drive o GitHub. Si no conectás nada, igual funciona con búsqueda web, abrir páginas y YouTube.
+
+Para comprobar qué ve tu cuenta, corré `claude` y escribí `/mcp`: los conectores de claude.ai aparecen ahí.
+
+### 4. Descargar e instalar JARVIS
 ```
 git clone https://github.com/Chrisnatalx/JARVIS.git
 cd JARVIS
 npm install
 npm link
 ```
-
 `npm link` registra el comando global `jarvis`. Si después movés la carpeta, volvé a correr `npm link` adentro.
+
+### 5. Tu configuración (opcional)
+Copiá `.env.example` como `.env` y completá lo que necesites. Las variables están explicadas en [Configuración](#configuración). Lo más común es esto:
+```
+JARVIS_GOOGLE_ACCOUNT=tu-mail@ejemplo.com
+```
+Sirve si tenés varias cuentas de Google en el navegador, para que Calendar y Gmail se abran en la correcta. El `.env` es tuyo y no se sube al repo.
+
+### 6. Arrancar
+Corré `jarvis`, permití el micrófono cuando el navegador lo pida y hablale.
 
 ## Uso
 En cualquier terminal:

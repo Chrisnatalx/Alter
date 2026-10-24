@@ -180,3 +180,13 @@ test('serveStatic: el nombre con $& queda literal (escapado) en la página', asy
   assert.ok(res.body.includes('content="A$&amp;B$$&lt;x&gt;"'), res.body.slice(0, 400));
   assert.ok(res.body.includes(token));
 });
+
+test('un cuerpo JSON que no es objeto (null, número, lista) da 400, no 500', async () => {
+  for (const body of [null, 5, [1]]) {
+    const deps = mkDeps(fakeSession());
+    const res = await call(deps, 'POST', '/api/message', body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.equal(deps.created.length, 0);
+  }
+  assert.equal((await call(mkDeps(fakeSession()), 'POST', '/api/confirm', null)).status, 400);
+});

@@ -114,7 +114,9 @@ class Session {
   async _consume() {
     try {
       for await (const msg of this.q) {
-        for (const [event, data] of mapMessage(msg, this.state)) this.emit(event, data);
+        // Con la sesión cerrada (p. ej. tras NUEVA) lo que aún llega es viejo: se procesa pero no se emite
+        const events = mapMessage(msg, this.state);
+        if (!this._closed) for (const [event, data] of events) this.emit(event, data);
       }
       if (!this._closed) this.emit('error', { message: 'La sesión terminó inesperadamente.' });
     } catch (err) {

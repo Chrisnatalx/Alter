@@ -234,3 +234,20 @@ test('getters tasks y model reflejan el estado', async () => {
   assert.deepEqual(s.tasks, [{ id: 't1', description: 'd', agent: 'a' }]);
   s.close();
 });
+
+test('con la sesión cerrada no emite los mensajes que siguen llegando', async () => {
+  const events = [];
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const queryFn = () => ({
+    async *[Symbol.asyncIterator]() { yield init; await gate; yield delta('viejo'); yield success; },
+    close() {},
+  });
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn });
+  s.start({});
+  await tick();
+  s.close();
+  release();
+  await tick();
+  assert.deepEqual(events.map(([e]) => e), ['turn', 'init']); // nada después del cierre, ni siquiera un error
+});

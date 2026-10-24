@@ -54,11 +54,18 @@ function serveStatic(req, res, token = TOKEN) {
   });
 }
 
+// El cuerpo debe ser un objeto JSON: `null`, un número o una lista darían 500 al leer sus campos.
+function parseBody(body) {
+  const v = JSON.parse(body || '{}');
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('El cuerpo debe ser un objeto JSON');
+  return v;
+}
+
 function readJson(req) {
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on('end', () => { try { resolve(JSON.parse(body || '{}')); } catch (e) { reject(e); } });
+    req.on('end', () => { try { resolve(parseBody(body)); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
 }

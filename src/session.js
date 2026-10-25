@@ -6,6 +6,7 @@ const { createPermissionGate, describeTool } = require('./permissions');
 const { createJarvisTools } = require('./tools');
 const { nowLine } = require('./prompt');
 const { startTurnTiming, trackMessage, summarizeTiming } = require('./timing');
+const { missingKeptServers } = require('./mcp-filter');
 const crypto = require('crypto');
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -176,10 +177,13 @@ class Session {
     const tools = init.tools || [];
     const mcpTools = tools.filter((t) => t.startsWith('mcp__')).length;
     const mcp = init.mcp_servers || [];
+    // Con el filtro, un conservado que falta haría perder herramientas sin aviso: se registra y se avisa
+    const faltan = this.config.mcpFilter ? missingKeptServers(mcp) : undefined;
     this.timingLog.write({
       tipo: 'sesion', fecha: new Date().toISOString(), model: init.model,
-      tools: tools.length, mcpTools, mcp, skills: (init.skills || []).length, agents: init.agents ?? [],
+      tools: tools.length, mcpTools, mcp, skills: (init.skills || []).length, agents: init.agents ?? [], faltan,
     });
+    if (faltan?.length) console.warn(`  [AVISO] Con el filtro de MCP faltan: ${faltan.join(', ')}`);
     const servers = mcp.map((m) => `${m.name} (${m.status})`).join(', ') || 'ninguno';
     console.log(`  [SESIÓN] modelo ${init.model} · ${tools.length} herramientas (${mcpTools} de MCP) · servidores: ${servers}`);
   }

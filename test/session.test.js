@@ -397,6 +397,21 @@ test('timing: el turno de la persona emite timing antes de done y lo registra', 
   s.close();
 });
 
+test('con el filtro de MCP, el registro sesion lista los conservados que faltan y avisa', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const warn = t.mock.method(console, 'warn', () => {});
+  const { queryFn } = fakeQuery([initFull, success]);
+  const log = spyLog();
+  const s = new Session({ config: { ...config, mcpFilter: true }, emit: () => {}, sdk: fakeSdk, queryFn, timingLog: log });
+  s.start({});
+  await tick();
+  const sesion = log.records.find((r) => r.tipo === 'sesion');
+  assert.ok(sesion.faltan.includes('claude.ai Gmail'));
+  assert.ok(!sesion.faltan.includes('jarvis'));
+  assert.match(warn.mock.calls[0].arguments[0], /Con el filtro de MCP faltan/);
+  s.close();
+});
+
 test('timing: turno de tarea no se mide', async (t) => {
   t.mock.method(console, 'log', () => {});
   const { queryFn } = fakeQuery([taskInit, init, success]);

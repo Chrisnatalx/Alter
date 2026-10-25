@@ -16,6 +16,17 @@ test('JARVIS_TIMEZONE inválida avisa y usa la zona del sistema', () => {
   assert.match(err, /JARVIS_TIMEZONE/);
 });
 
+function configWith(env, expr) {
+  const r = spawnSync(process.execPath, ['-e', `console.log(JSON.stringify(require("./src/config").${expr}))`], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...env }, encoding: 'utf8' });
+  return JSON.parse(r.stdout.trim());
+}
+
+test('el preámbulo está prendido salvo con JARVIS_PROMPT_PREAMBLE=0', () => {
+  assert.equal(configWith({ JARVIS_PROMPT_PREAMBLE: '' }, 'promptPreamble'), true);
+  assert.equal(configWith({ JARVIS_PROMPT_PREAMBLE: '1' }, 'promptPreamble'), true);
+  assert.equal(configWith({ JARVIS_PROMPT_PREAMBLE: '0' }, 'promptPreamble'), false);
+});
+
 test('JARVIS_TIMEZONE válida se respeta sin avisos', () => {
   const { out, err } = tzWith('America/Argentina/Buenos_Aires');
   assert.equal(out, 'America/Argentina/Buenos_Aires');

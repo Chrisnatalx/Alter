@@ -40,7 +40,7 @@ function createInputQueue() {
 }
 
 function createState() {
-  return { userSince: false, taskPending: 0, interrupting: false, turnActive: false, turnOrigin: null, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
+  return { userSince: false, taskPending: 0, interrupting: false, turnActive: false, turnOrigin: null, turnHasText: false, turnStartedAt: 0, sessionId: null, model: null, tasks: [] };
 }
 
 // Traduce un mensaje del SDK a eventos para la interfaz. Pura salvo por `state`, que se muta.
@@ -55,6 +55,7 @@ function mapMessage(msg, state) {
         state.turnStartedAt = Date.now();
         state.turnActive = true; // hay un turno en curso hasta que llegue su result
         state.turnOrigin = origin;
+        state.turnHasText = false;
         state.sessionId = msg.session_id;
         state.model = msg.model;
         return [['turn', { origin }], ['init', { sessionId: msg.session_id, model: msg.model }]];
@@ -74,7 +75,10 @@ function mapMessage(msg, state) {
   if (msg.type === 'stream_event') {
     if (msg.parent_tool_use_id != null) return []; // texto y herramientas de un subagente: no se leen en voz alta
     const ev = msg.event;
-    if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') return [['delta', { text: ev.delta.text }]];
+    if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') { state.turnHasText = true; return [['delta', { text: ev.delta.text }]]; }
+    // Un bloque de texto nuevo (p. ej. la respuesta después del «Ya me fijo.» y la herramienta) arranca en otra
+    // línea: si no, la interfaz pega «fijo.Hoy». El salto también cierra la frase anterior para la voz.
+    if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text' && state.turnHasText) return [['delta', { text: '\n' }]];
     if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use') return [['tool', describeTool(ev.content_block.name)]];
     return [];
   }

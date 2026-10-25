@@ -92,7 +92,7 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
 | `JARVIS_AGENT_<NOMBRE>_MODEL` | `haiku` (agenda), `sonnet` (correo, investigador) | Modelo de cada subagente: `AGENDA`, `CORREO` o `INVESTIGADOR` (ver [Subagentes](#subagentes-y-tareas-en-segundo-plano)) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
-| `JARVIS_PROMPT_PREAMBLE` | apagado | **Experimental.** Con `1`, antes de usar una herramienta JARVIS dice una frase muy corta («Ya me fijo.») para que la voz arranque mientras corre la consulta |
+| `JARVIS_PROMPT_PREAMBLE` | prendido | Antes de usar una herramienta, JARVIS dice una frase muy corta y variada («Ya me fijo.», «Dame un segundo.»), así la voz arranca mientras corre la consulta: la primera frase bajó de unos 6 a 8 s a cerca de 1 s. `0` lo apaga |
 | `JARVIS_TIMING_LOG` | `logs/tiempos.jsonl` | Registro local de tiempos por turno (ver [Tiempos de respuesta](#tiempos-de-respuesta)). `0` lo apaga |
 
 ## Tiempos de respuesta

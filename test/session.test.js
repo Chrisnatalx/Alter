@@ -50,6 +50,21 @@ test('si la persona escribió, el origen es user aunque haya llegado una tarea',
   assert.deepEqual(mapMessage(init, state)[0], ['turn', { origin: 'user' }]);
 });
 
+const textStart = (parent = null) => ({ type: 'stream_event', parent_tool_use_id: parent, event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+
+test('bloques de texto seguidos del orquestador van separados («Ya me fijo.» y la respuesta)', () => {
+  const state = mkState();
+  state.userSince = true;
+  const out = [init, textStart(), delta('Ya me fijo.'), textStart(), delta('Hoy no tenés nada.'), success].flatMap((m) => mapMessage(m, state));
+  const text = out.filter(([e]) => e === 'delta').map(([, d]) => d.text).join('');
+  assert.equal(text, 'Ya me fijo.\nHoy no tenés nada.'); // el salto corta la frase para la voz y separa en el registro
+  // el primer bloque de un turno nuevo no lleva separador
+  const next = [init, textStart(), delta('Hola.')].flatMap((m) => mapMessage(m, state));
+  assert.equal(next.filter(([e]) => e === 'delta').map(([, d]) => d.text).join(''), 'Hola.');
+  // un bloque de texto de un subagente no cuenta
+  assert.deepEqual(mapMessage(textStart('x'), state), []);
+});
+
 test('un delta con parent_tool_use_id (subagente) no emite nada', () => {
   assert.deepEqual(mapMessage(delta('x', 'abc'), mkState()), []);
 });

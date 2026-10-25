@@ -41,8 +41,8 @@ module.exports = Object.freeze({
   timezone: resolveTimezone(process.env.JARVIS_TIMEZONE),
   claudeBin: resolveClaudeBin(),
   confirmTimeoutMs: 2 * 60 * 1000, // sin respuesta en 2 minutos → se deniega
-  // Experimental: una frase corta antes de cada herramienta (apagado por defecto)
-  promptPreamble: process.env.JARVIS_PROMPT_PREAMBLE === '1',
+  // Una frase corta antes de cada herramienta, para que la voz arranque antes; '0' lo apaga
+  promptPreamble: process.env.JARVIS_PROMPT_PREAMBLE !== '0',
   // Registro local de tiempos por turno (JSONL); '0' lo apaga
   timingLog: process.env.JARVIS_TIMING_LOG === '0' ? '' : (process.env.JARVIS_TIMING_LOG || path.join(ROOT, 'logs', 'tiempos.jsonl')),
   coreDir,

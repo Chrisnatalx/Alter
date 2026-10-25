@@ -22,27 +22,31 @@ test('nowLine deriva la ciudad de la zona horaria', () => {
   assert.ok(nowLine('America/Argentina/Buenos_Aires').endsWith(', Buenos Aires'));
 });
 
-const PREAMBLE = 'Antes de llamar a cualquier herramienta, decí primero una frase muy corta y variada, de dos a cinco palabras (por ejemplo «Ya me fijo.» o «Dame un segundo.»), sin direcciones web, y recién después usá la herramienta.';
+const PREAMBLE_START = 'Antes de llamar a cualquier herramienta, decí primero una frase muy corta';
 
-test('preamble agrega la frase corta antes de las herramientas', () => {
-  const p = buildSystemPrompt({ userName: '', preamble: true });
-  assert.ok(p.includes(PREAMBLE));
+test('el preámbulo viene por defecto y pide frases cortas y variadas', () => {
+  const p = buildSystemPrompt({ userName: '' });
+  assert.ok(p.includes(PREAMBLE_START));
+  assert.ok(p.includes('de dos a cinco palabras'));
+  assert.ok(p.includes('no repitas la misma dos veces seguidas'));
+  assert.ok(p.includes('«Ya me fijo.»'));
   assert.ok(p.includes('requiere que la persona lo confirme')); // la regla de confirmación sigue
   assert.ok(p.includes('herramienta Agent'));
 });
 
-test('sin preamble el prompt queda como hoy', () => {
-  assert.ok(!buildSystemPrompt({ userName: '' }).includes('Antes de llamar a cualquier herramienta'));
-  assert.equal(buildSystemPrompt({ userName: '', preamble: false }), buildSystemPrompt({ userName: '' }));
+test('con preamble false el prompt no lo trae', () => {
+  const p = buildSystemPrompt({ userName: '', preamble: false });
+  assert.ok(!p.includes(PREAMBLE_START));
+  assert.ok(p.includes('requiere que la persona lo confirme'));
 });
 
-test('buildAgentOptions pasa JARVIS_PROMPT_PREAMBLE al prompt', () => {
+test('buildAgentOptions: preámbulo salvo que la config lo apague', () => {
   const { buildAgentOptions } = require('../src/agent-options');
-  const on = buildAgentOptions({ config: { coreDir: '.', userName: '', promptPreamble: true }, canUseTool: () => {}, mcpServers: {} });
-  const off = buildAgentOptions({ config: { coreDir: '.', userName: '' }, canUseTool: () => {}, mcpServers: {} });
-  assert.ok(on.systemPrompt.includes(PREAMBLE));
-  assert.ok(!off.systemPrompt.includes(PREAMBLE));
-  assert.equal(on.permissionMode, 'default');
+  const opts = (over) => buildAgentOptions({ config: { coreDir: '.', userName: '', ...over }, canUseTool: () => {}, mcpServers: {} });
+  assert.ok(opts({}).systemPrompt.includes(PREAMBLE_START));
+  assert.ok(opts({ promptPreamble: true }).systemPrompt.includes(PREAMBLE_START));
+  assert.ok(!opts({ promptPreamble: false }).systemPrompt.includes(PREAMBLE_START));
+  assert.equal(opts({}).permissionMode, 'default');
 });
 
 test('el prompt trae las reglas de delegación', () => {

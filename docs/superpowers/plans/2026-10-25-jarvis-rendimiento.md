@@ -265,7 +265,7 @@ Cambios al plan, en este orden:
 - [x] **5b. Una sesión nueva por corrida:** `scripts/medir.js` hace `POST /api/new` (con `force`) entre corridas para que ninguna repetición se conteste con lo que ya estaba en la conversación. Se vuelve a medir la base (12 turnos, `claude-opus-5-5`) antes de comparar. El primer pedido de cada corrida es arranque en frío.
   - Implementado con `planRuns` en `medir-lib.js`. Consecuencia: el saludo siempre es el primero, así que solo aparece en la columna «frío» (n=3) y deja de entrar en la mediana global, que pasa a ser agenda, correo y web. `--comparar` suma una columna «frío».
   - La prueba de delegación de 5c va en el mismo guion, con `MEDIR_DELEGACION=1`, al final de la sesión tibia. Registra `delegatedTo`, `background` (`task_started`), `taskTurnDoneMs` (cuándo la interfaz dice el resultado) y los dos textos.
-- **Task 7 (`JARVIS_PROMPT_DIRECT`) en espera:** no se implementa hasta que la persona decida. En la base no hubo delegación en las consultas rápidas.
+- **Task 7 (`JARVIS_PROMPT_DIRECT`): descartada por la persona.** Motivo: en ninguna medición hubo delegación en las consultas rápidas. El orquestador ya usa el conector de Calendar o Gmail directamente, así que el cambio no tiene nada que ahorrar.
 - [x] **5c. Modelo principal Sonnet:** configuración `sonnet` con `JARVIS_MODEL=claude-sonnet-5-5` (12 turnos) contra la base nueva. Además, una prueba de delegación por modelo (Opus y Sonnet) con «investigá a fondo las novedades de Node 24 y avisame»: si delega en `investigador` en segundo plano (`Agent` con ese subagente y `task_started`), cuánto tarda en volver a hablar y el texto de las respuestas para comparar la calidad.
 - [x] **5d. Candidato nuevo `JARVIS_PROMPT_PREAMBLE=1`** (apagado por defecto): una oración en el prompt para que, antes de llamar a una herramienta, JARVIS diga una frase muy corta y variada (2 a 5 palabras, p. ej. «Ya me fijo.»). Primero la prueba del prompt. Se mide con el modelo por defecto y se verifica en el flujo que la frase llega antes que la herramienta.
   - Implementado: `buildSystemPrompt({ userName, preamble })`, `config.promptPreamble` y `flags.promptPreamble` en el registro `servidor`. `textBeforeTool(record)` en `medir-lib.js` dice, por pedido, si el primer texto del servidor llegó antes que la primera herramienta.
@@ -276,6 +276,15 @@ Cambios al plan, en este orden:
     - `skills: []` no bajó las skills de `init` (siguen 64).
     - La mayor parte de las herramientas que sobran son de los servidores de la persona `Estima-prod-chris` y `crm` (unas 110), no de los conectores de claude.ai.
   - Opciones para que decida la persona: (a) dejarla de lado; (b) apagar los servidores de la persona por nombre con `deniedMcpServers` (son nombres simples: habría que probar si la denylist los toma, y leer sus nombres de la configuración de la persona); (c) aceptar el toggle con su efecto persistente. No se mide hasta decidir, así que no se gastan esos 12 turnos.
+  - [x] **Retomada con el método que funcionó en la rama de gestos (`src/feeds/google.js`): allowlist por `serverUrl`.** Reglas: nunca `toggleMcpServer` y nunca escribir configuración de la persona. Hallazgos de las sondas (consulta abierta más `mcpServerStatus()`, sin mensajes):
+    - URLs reales (`McpServerStatus.config.url`): Gmail `https://gmailmcp.googleapis.com/mcp/v1`, Calendar `https://calendarmcp.googleapis.com/mcp/v1`, Drive `https://drivemcp.googleapis.com/mcp/v1`, GitHub `https://api.githubcopilot.com/mcp`. La allowlist usa `https://<host>/*`.
+    - `jarvis` (tipo `sdk`) pasa siempre, sin estar en la lista.
+    - Discord (stdio, `bun run --cwd <carpeta del plugin> --shell=bun --silent start`): no pasa por nombre (ni `plugin:discord:discord` ni `discord`), ni con `*` ni con `${CLAUDE_PLUGIN_ROOT}` en `serverCommand`. Sí pasa con el comando exacto, que `src/mcp-filter.js` arma leyendo (solo lectura) `~/.claude/plugins/installed_plugins.json` y el `.mcp.json` del plugin. Sigue `failed`, igual que sin el filtro.
+    - Con el filtro quedan 6 servidores en lugar de 32: las herramientas bajan de 231 (228 de MCP) a 101 (98 de MCP).
+    - **Problema que apareció y se arregló:** con el filtro, el `init` llega antes que los conectores de claude.ai. Un primer turno en frío no tenía sus herramientas y delegaba en `agenda` (27 s). Ahora la sesión lee `mcpServerStatus()` y entrega el primer mensaje cuando los cuatro terminaron de conectar (tope 10 s). Con eso, el primer turno en frío usa Calendar directamente. El aviso `faltan` usa ese estado y no el `init` temprano.
+    - `skills: []` no se usa: no tenía efecto.
+  - **Medición (12 turnos, `JARVIS_MCP_FILTER=1`, `JARVIS_PROMPT_PREAMBLE=0`, Opus) contra base2.** Mediana de primera frase en ms: agenda 5827 (−738), correo 5618 (−137), web 17949 (−975), **global 7494 (−479, ✔ ≥300)**. El frío de esa corrida (2375) no vale, porque se midió antes de la espera y sin las herramientas de los conectores. Una sola muestra en frío con la espera: init 3450 ms (la base2 tenía 2751). El frío probablemente sube unos 0,7 s y queda por confirmar.
+  - [x] **Adoptado por defecto** (la persona aceptó la recomendación): `JARVIS_MCP_FILTER=0` carga todos los conectores.
 - Task 9: combinar solo lo que mejoró ≥300 ms por su lado, reporte final y PARAR. No se cambia ningún default.
   - **Resultados (2026-10-25, sesión nueva por corrida, mediana de primera frase en ms, sin frío; frío aparte):**
 
@@ -290,12 +299,16 @@ Cambios al plan, en este orden:
     - La prueba de delegación salió bien en los dos modelos: ambos usan `Agent(investigador)` en segundo plano. Opus contesta a los 7,9 s y dice el resultado a los 65 s. Sonnet contesta a los 6,2 s y lo dice a los 54 s.
     - Turnos usados después de la decisión: unos 55 (base2 14, 3 de spike, sonnet 14, preámbulo 12, combinado 12).
     - Los textos para comparar están en `logs/textos-comparacion.txt` (no se sube).
-  - [ ] **PARAR:** la persona decide qué pasar a default.
+  - [x] **PARAR:** la persona decide qué pasar a default.
+  - **Decisión de la persona (2026-10-25):** preámbulo prendido por defecto (`JARVIS_PROMPT_PREAMBLE=0` lo apaga), con frases más variadas («no repitas la misma dos veces seguidas»). El modelo sigue siendo el de la cuenta (Opus): no se fija en el código. Task 7 descartada. Task 6 rehecha y adoptada (ver arriba).
+  - Arreglo pedido junto con el preámbulo: los bloques de texto seguidos del orquestador ya no se pegan («Ya me fijo.Hoy»). `mapMessage` mete un `\n` entre un bloque y el siguiente del mismo turno. El salto cierra la frase para la voz y en el registro se ve como espacio.
 - Presupuesto: unos 13 turnos usados. Quedan unos 64 (base nueva, filtro, Sonnet, preámbulo y una combinación a 12 cada una, más unos 4 de delegación), con un tope de unos 70 sin volver a preguntar.
 
 ## Fase D: cambios candidatos (cada uno con su bandera, apagado por defecto y medido)
 
 ### Task 6: Cargar solo los servidores MCP que JARVIS conserva (`JARVIS_MCP_FILTER`)
+
+> **Estado: hecha y adoptada por defecto, con otro mecanismo** (allowlist por `serverUrl` y comando exacto, sin `toggleMcpServer` ni `skills: []`). Los pasos de abajo quedan como estaban planeados. Lo que se hizo de verdad está en «Decisiones de la persona sobre el reporte base».
 
 **Files:**
 - Create: `src/mcp-filter.js`
@@ -330,6 +343,8 @@ Cambios al plan, en este orden:
 
 ### Task 7: Las consultas rápidas van directo al conector (`JARVIS_PROMPT_DIRECT`)
 
+> **Estado: descartada por la persona.** En ninguna medición hubo delegación en las consultas rápidas, así que no había nada que ahorrar.
+
 **Files:**
 - Modify: `src/prompt.js` (`buildSystemPrompt({ userName, directQuick })`), `src/agent-options.js` (pasa `directQuick: config.promptDirect`), `src/config.js` (`promptDirect: process.env.JARVIS_PROMPT_DIRECT === '1'`), `README.md`, `.env.example`
 - Test: `test/prompt.test.js`
@@ -352,6 +367,8 @@ Cambios al plan, en este orden:
 - [ ] **Step 6: Commit.** `git commit -m "Variante de prompt: consultas rápidas directo al conector (JARVIS_PROMPT_DIRECT)"`
 
 ### Task 8: Escucha continua con temporizador de silencio propio (`?escucha=continua`)
+
+> **Estado: no hecha.** Depende de la base de voz (tarea 5, paso 3), que todavía no existe: primero la persona tiene que juntar al menos 8 registros `voz` (pasos en el README, «Medir la voz»).
 
 **Files:**
 - Modify: `public/app.js`, solo `startListening` (más una constante y la lectura del modo cerca de `SR`). No se tocan la escucha de confirmación ni el barge-in.
@@ -379,6 +396,8 @@ Cambios al plan, en este orden:
 - [ ] **Step 5: Commit.** `git commit -m "Escucha continua opcional con temporizador de silencio (?escucha=continua)"`
 
 ### Task 9: Combinación, reporte final y adopción (parada obligatoria)
+
+> **Estado: hecha según las decisiones de la persona** (combinación y adopción en «Decisiones de la persona sobre el reporte base»). Falta el paso 5 (`scripts/e2e.sh` y la prueba a mano de ESC y de la interrupción por voz), que queda para la persona: el cupo pactado ya se usó.
 
 **Files:** `src/config.js`, `README.md` y `.env.example`, pero solo si la persona aprueba algún cambio de default.
 

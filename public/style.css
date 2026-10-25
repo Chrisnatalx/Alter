@@ -212,6 +212,13 @@ body:not([data-state="boot"]) #boot { opacity: 0; visibility: hidden; }
 .hand-state.present::before { content: '● '; }
 .hand-state.unavailable { color: var(--amber); opacity: .8; }
 
+/* Con una vista abierta el núcleo queda chiquito en la esquina (lo dibuja el canvas, ver coreLayout en app.js):
+   los anillos se van y la zona clickeable lo sigue, así tocarlo sigue interrumpiendo o prendiendo el micrófono */
+#hud { transition: filter .6s, opacity .6s; }
+body:not([data-face="core"]) #hud { opacity: 0; }
+body:not([data-face="core"]) #core-btn { left: calc(100% - 90px); top: calc(100% - 170px); width: 96px; height: 96px; }
+body:not([data-face="core"]) .panel.right { bottom: 240px; } /* el registro le deja lugar al núcleo chiquito */
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .panel { display: none; }

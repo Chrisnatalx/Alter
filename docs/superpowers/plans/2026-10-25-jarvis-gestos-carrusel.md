@@ -464,20 +464,21 @@ Es pegamento del navegador: se verifica a mano.
   - `coreFx = { zoom, ox, oy }` con sus objetivos `coreFxTarget`.
   - `coreLayout`: interpola entre «centro» `{ cx: W/2, cy: H*0.47, scale: 1 }` y «esquina» `{ cx: W - 90*DPR, cy: H - 170*DPR, scale: 0.22 }`.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
   - En `frame()`, `cx`, `cy` y `R` salen de `coreLayout` y `coreFx`: `R *= coreFx.zoom`, `cx += coreFx.ox * W` y `cy += coreFx.oy * H`.
   - Todo se interpola con un factor de 0.12 por cuadro.
   - `release` pone los objetivos en `{1, 0, 0}`. `ungrab` vuelve a 0 solo `ox` y `oy`.
   - El pellizco solo actúa con `app.face === 'core'`. En las vistas se ignora.
   - Con una cara distinta de `core`, `#hud` se desvanece y `#core-btn` se mueve sobre la esquina (clase `body[data-face]`), así tocar el núcleo chiquito sigue interrumpiendo o prendiendo el micrófono.
   - El color sigue saliendo de `COLORS[app.state]`, así que el núcleo chiquito cambia con el estado igual que el grande.
+  - *Agregado al implementar:* el arrastre multiplica el desplazamiento de la mano por `DRAG_GAIN = 1.5` (valor inicial, se ajusta probando); en la esquina el tamaño de las partículas se escala con `√scale` para que no quede una mancha; y con una vista abierta el panel de registro sube (`bottom: 240px`) para no tapar el núcleo chiquito.
 - [ ] **Step 2: Verificación manual:**
   - Con la pose de pellizco (mayor, anular y meñique recogidos), abrir y cerrar los dedos agranda y achica el núcleo de forma continua.
   - Juntar los dedos agarra el núcleo y moverse lo arrastra en la misma dirección que la mano.
   - Al soltar, el núcleo vuelve al centro y a zoom 1 de forma suave.
   - Una mano abierta no hace zoom.
   - En Performance de DevTools, con la cámara prendida, los cuadros del núcleo no bajan de forma visible respecto de la cámara apagada. Anotar los fps y el tiempo de `detectForVideo` de `?debug`.
-- [ ] **Step 3: Run** `npm test`. Expected: PASS.
+- [x] **Step 3: Run** `npm test`. Expected: PASS.
 - [ ] **Step 4: Commit** `git commit -m "Pellizco: zoom y arrastre del núcleo, y núcleo chiquito en las vistas"`
 
 ### Task 12: Carrusel de vistas: Calendar, Mail y Clima

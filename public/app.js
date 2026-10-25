@@ -31,6 +31,7 @@
     confirm: null,    // acción esperando un sí/no: { id, app, action, detail }
     replaced: false,  // otra ventana tomó el canal: esta queda inerte
     camOn: store.get('camOn', true), // cámara para los gestos con la mano (siempre activa salvo que la apagues)
+    face: 'core',     // cara del carrusel que se ve: core, calendar, mail o weather
   };
 
   function setState(s) {
@@ -77,6 +78,18 @@
   let energy = 0;
   let rotY = 0, rotX = 0.35;
 
+  // Pellizco: zoom y arrastre del núcleo (ox, oy en fracción de pantalla). Se va hacia el objetivo de a poco.
+  const coreFx = { zoom: 1, ox: 0, oy: 0 };
+  const coreFxTarget = { zoom: 1, ox: 0, oy: 0 };
+  // Con una vista abierta el núcleo se achica a una esquina: 0 = centro, 1 = esquina
+  let cornerK = 0;
+  function coreLayout() {
+    const center = { cx: W / 2, cy: H * 0.47, scale: 1 };
+    const corner = { cx: W - 90 * DPR, cy: H - 170 * DPR, scale: 0.22 };
+    const k = cornerK;
+    return { cx: center.cx + (corner.cx - center.cx) * k, cy: center.cy + (corner.cy - center.cy) * k, scale: center.scale + (corner.scale - center.scale) * k };
+  }
+
   function frame(t) {
     const time = t / 1000;
     const target = COLORS[app.state] || COLORS.idle;
@@ -97,8 +110,12 @@
     ctx.globalCompositeOperation = 'source-over';
     ctx.clearRect(0, 0, W, H);
 
-    const cx = W / 2, cy = H * 0.47;
-    const R = Math.min(W, H) * 0.17 * (1 + energy * 0.25);
+    for (const k in coreFx) coreFx[k] += (coreFxTarget[k] - coreFx[k]) * 0.12;
+    cornerK += ((app.face === 'core' ? 0 : 1) - cornerK) * 0.12;
+    const L = coreLayout();
+    const cx = L.cx + coreFx.ox * W, cy = L.cy + coreFx.oy * H;
+    const R = Math.min(W, H) * 0.17 * (1 + energy * 0.25) * L.scale * coreFx.zoom;
+    const ps = Math.sqrt(L.scale); // en la esquina las partículas también se achican, si no queda una mancha
     const [cr, cg, cb] = col.map(Math.round);
 
     // Resplandor interno
@@ -125,7 +142,7 @@
       const px = cx + x1 * R * scale, py = cy + y1 * R * scale;
       const depth = (1 - z2) / 2; // 0 atrás · 1 adelante
       const a = 0.15 + depth * 0.75;
-      const s = (0.6 + depth * 1.6) * DPR * (1 + energy * 0.4);
+      const s = (0.6 + depth * 1.6) * DPR * (1 + energy * 0.4) * ps;
       ctx.fillStyle = `rgba(${cr},${cg},${cb},${a})`;
       ctx.fillRect(px, py, s, s);
     }
@@ -138,7 +155,7 @@
       const scale = fov / (fov + z * 0.5);
       const px = cx + x1 * R * scale, py = cy + y * R * scale * 0.9;
       ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.25 + energy * 0.5})`;
-      ctx.fillRect(px, py, 1.4 * DPR, 1.4 * DPR);
+      ctx.fillRect(px, py, 1.4 * DPR * ps, 1.4 * DPR * ps);
     }
 
     // Arco de nivel en el HUD
@@ -986,6 +1003,18 @@
   // Un evento del rastreador: la presencia la muestra el indicador; el pellizco mueve el núcleo y el giro, el carrusel
   function onGesture(ev) {
     if (ev.type === 'hand') { cam.hand = ev.present; setHandState(); return; }
+    pinchGesture(ev);
+  }
+
+  // Pellizco, como en el celular: abrir y cerrar los dedos agranda o achica el núcleo; juntarlos del todo
+  // lo agarra y moverse lo arrastra. Al soltar vuelve solo a su lugar y a zoom 1. Solo en la cara del núcleo.
+  const DRAG_GAIN = 1.5; // un tercio del cuadro de la cámara mueve el núcleo media pantalla
+  function pinchGesture(ev) {
+    if (ev.type === 'release') { Object.assign(coreFxTarget, { zoom: 1, ox: 0, oy: 0 }); return; } // siempre, por las dudas
+    if (app.face !== 'core') return;
+    if (ev.type === 'zoom') coreFxTarget.zoom = ev.zoom;
+    else if (ev.type === 'drag') { coreFxTarget.ox = ev.dx * DRAG_GAIN; coreFxTarget.oy = ev.dy * DRAG_GAIN; }
+    else if (ev.type === 'ungrab') { coreFxTarget.ox = 0; coreFxTarget.oy = 0; } // deja de arrastrar; el zoom sigue al pellizco
   }
 
   $('cam-btn').addEventListener('click', (e) => { e.currentTarget.blur(); toggleCam(); });

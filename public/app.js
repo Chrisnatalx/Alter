@@ -30,6 +30,7 @@
     voicePulse: 0,    // 0..1, envolvente simulada de la voz de salida
     confirm: null,    // acción esperando un sí/no: { id, app, action, detail }
     replaced: false,  // otra ventana tomó el canal: esta queda inerte
+    camOn: store.get('camOn', true), // cámara para los gestos con la mano (siempre activa salvo que la apagues)
   };
 
   function setState(s) {
@@ -561,6 +562,7 @@
       case 'replaced': // otra ventana tomó el canal: esta se calla y no reconecta
         app.replaced = true; taskQueue.length = 0
         dropRec(); closeConfirm(); stopSpeaking();
+        stopCam(); // la otra ventana usa la cámara
         cur = null; userBusy = false; streamDone = true;
         $('replaced').hidden = false;
         $('t-link').textContent = 'CEDIDO';
@@ -887,6 +889,9 @@
     v.textContent = app.muted ? 'VOZ · OFF' : 'VOZ · ON';
     v.classList.toggle('on', !app.muted);
     $('text-input').placeholder = app.micOn ? 'Te escucho… o escribí acá' : 'Micrófono apagado (ESPACIO para prenderlo). Escribí acá…';
+    const c = $('cam-btn');
+    c.textContent = app.camOn ? 'CÁMARA · ON' : 'CÁMARA · OFF';
+    c.classList.toggle('on', app.camOn);
   }
   $('mode-btn').addEventListener('click', (e) => { e.currentTarget.blur(); toggleMic(); });
   $('mute-btn').addEventListener('click', (e) => {
@@ -931,6 +936,76 @@
   });
 
   // ============================================================
+  //  CÁMARA Y GESTOS (hands.js entrega la mano; gestures.js la convierte en eventos)
+  // ============================================================
+  const tracker = window.JarvisGestures?.createGestureTracker();
+  const cam = { status: 'off', detail: '', hand: false };
+
+  function setHandState() {
+    const el = $('hand-state');
+    let text = 'CÁMARA APAGADA';
+    if (cam.status === 'loading') text = 'CÁMARA · INICIANDO';
+    else if (cam.status === 'on') text = cam.hand ? 'MANO DETECTADA' : 'SIN MANO';
+    else if (cam.status === 'denied') text = 'GESTOS NO DISPONIBLES: SIN PERMISO DE CÁMARA';
+    else if (cam.status === 'no-model') text = 'GESTOS NO DISPONIBLES: corré npm run modelo';
+    else if (cam.status === 'error') text = 'GESTOS NO DISPONIBLES: ' + (cam.detail || 'ERROR').slice(0, 60);
+    el.textContent = text;
+    el.classList.toggle('present', cam.status === 'on' && cam.hand);
+    el.classList.toggle('unavailable', ['denied', 'no-model', 'error'].includes(cam.status));
+  }
+
+  function startCam() {
+    if (!window.JarvisHands || !tracker || app.replaced) { if (!window.JarvisHands) { cam.status = 'error'; cam.detail = 'sin módulo de manos'; setHandState(); } return; }
+    JarvisHands.start({
+      onFrame: (t, hand) => {
+        if (DEBUG) cam.x = hand ? JarvisGestures.palmCenter(hand).x : null;
+        for (const ev of tracker.update({ t, hand })) onGesture(ev);
+      },
+      onStatus: (status, detail) => {
+        cam.status = status; cam.detail = detail || '';
+        if (status !== 'on') cam.hand = false;
+        if (status !== 'on' && status !== 'loading') console.warn('Gestos:', status, detail || '');
+        setHandState();
+      },
+    });
+  }
+
+  function stopCam() {
+    window.JarvisHands?.stop();
+    tracker?.reset();
+    onGesture({ type: 'release' }); // lo que estuviera agarrado vuelve a su lugar
+    cam.status = 'off'; cam.hand = false;
+    setHandState();
+  }
+
+  function toggleCam() {
+    app.camOn = !app.camOn; store.set('camOn', app.camOn); syncButtons();
+    if (app.camOn) startCam(); else stopCam();
+  }
+
+  // Un evento del rastreador: la presencia la muestra el indicador; el pellizco mueve el núcleo y el giro, el carrusel
+  function onGesture(ev) {
+    if (ev.type === 'hand') { cam.hand = ev.present; setHandState(); return; }
+  }
+
+  $('cam-btn').addEventListener('click', (e) => { e.currentTarget.blur(); toggleCam(); });
+  // C: prende/apaga la cámara (no mientras escribís ni durante el arranque)
+  addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyC' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || document.activeElement === $('text-input') || app.state === 'boot') return;
+    toggleCam();
+  });
+  // ?debug: tiempo medio de detección de manos cada 5 s, y la x de la palma (si al mover la mano hacia tu
+  // izquierda sube en vez de bajar, la webcam ya viene espejada: hay que sacar el unmirror en hands.js)
+  if (DEBUG) {
+    setInterval(() => {
+      if (cam.status !== 'on') return;
+      const s = JarvisHands.takeStats();
+      console.log(`[cam] detectForVideo ${s.avgMs.toFixed(1)} ms promedio · ${s.frames} cuadros en 5 s`);
+    }, 5000);
+    setInterval(() => { if (cam.status === 'on' && cam.x != null) console.log(`[cam] palma x=${cam.x.toFixed(2)}`); }, 500);
+  }
+
+  // ============================================================
   //  SECUENCIA DE ARRANQUE
   // ============================================================
   const BOOT_LINES = [
@@ -948,7 +1023,7 @@
     syncButtons(); updateTelemetry();
     connectEvents();
     // ?skip salta la animación (útil al recargar); el audio se habilita con el primer clic o tecla
-    if (new URLSearchParams(location.search).has('skip')) { setState('idle'); if (app.micOn) startListening(); return; }
+    if (new URLSearchParams(location.search).has('skip')) { setState('idle'); if (app.micOn) startListening(); if (app.camOn) startCam(); return; }
     const log = $('boot-log');
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     for (const [label, status] of BOOT_LINES) {
@@ -971,6 +1046,7 @@
     // Entra solo al terminar la animación, sin botón
     setState('idle');
     ensureMicMeter();
+    if (app.camOn) startCam();
     const intro = `${GREETING}${app.micOn ? '' : ' El micrófono está apagado, tocá la barra espaciadora para prenderlo.'}`;
     $('sub-ai').textContent = intro;
     addLog('ai', intro);

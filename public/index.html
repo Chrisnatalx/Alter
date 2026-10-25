@@ -95,6 +95,9 @@
     <div class="confirm-hint">Cerrá esta pestaña, o recargá (F5) para traer a JARVIS de vuelta acá.</div>
   </section>
 
+  <!-- Estado de la cámara y los gestos (el video nunca se muestra) -->
+  <div id="hand-state" class="hand-state" aria-live="polite">CÁMARA APAGADA</div>
+
   <section class="subtitles">
     <div id="sub-user" class="sub user"></div>
     <div id="sub-ai" class="sub ai"></div>
@@ -109,6 +112,7 @@
     <div class="controls">
       <button id="mode-btn" class="btn" title="Prender/apagar el micrófono (ESPACIO)">MICRÓFONO · ON</button>
       <button id="mute-btn" class="btn" title="Silenciar mi voz">VOZ · ON</button>
+      <button id="cam-btn" class="btn" title="Prender/apagar la cámara y los gestos (C)">CÁMARA · ON</button>
       <button id="reset-btn" class="btn" title="Empezar una conversación nueva">NUEVA</button>
     </div>
   </footer>
@@ -121,6 +125,9 @@
     </div>
   </div>
 
+  <script src="gestures.js"></script>
+  <script src="nav.js"></script>
+  <script src="hands.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

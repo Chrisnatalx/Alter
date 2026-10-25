@@ -263,6 +263,23 @@ test('GET /vendor con un host ajeno da 403', async () => {
   assert.equal(res.status, 403);
 });
 
+test('HEAD /vendor dice si está el modelo sin mandar el archivo', async () => {
+  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'jarvis-vendor-'));
+  const miss = fakeRes();
+  serveVendor({ url: '/vendor/models/hand_landmarker.task', method: 'HEAD' }, miss, { '/vendor/models/': dir });
+  await miss.finished;
+  assert.equal(miss.status, 404);
+  fsx.writeFileSync(pathx.join(dir, 'hand_landmarker.task'), 'x'.repeat(10));
+  const hit = fakeRes();
+  serveVendor({ url: '/vendor/models/hand_landmarker.task', method: 'HEAD' }, hit, { '/vendor/models/': dir });
+  await hit.finished;
+  assert.equal(hit.status, 200);
+  assert.equal(hit.headers['Content-Length'], 10);
+  assert.equal(hit.body, '');
+  // Y por handleRequest: HEAD no da 405
+  assert.equal((await call(mkDeps(fakeSession()), 'HEAD', '/vendor/mediapipe/vision_bundle.mjs')).status, 200);
+});
+
 test('GET /vendor por handleRequest sirve el bundle', async () => {
   const res = await call(mkDeps(fakeSession()), 'GET', '/vendor/mediapipe/vision_bundle.mjs');
   assert.equal(res.status, 200);

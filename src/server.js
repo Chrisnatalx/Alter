@@ -89,9 +89,18 @@ function serveVendor(req, res, roots = config.vendor) {
   const rel = urlPath.slice(prefix.length);
   const file = rel.includes('..') ? null : resolveInside(roots[prefix], rel);
   if (!file) { res.writeHead(403).end(); return true; }
+  const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' };
+  // HEAD: la página pregunta si está el modelo antes de pedir la cámara; no hace falta leer 8 MB para eso
+  if (req.method === 'HEAD') {
+    fs.stat(file, (err, st) => {
+      if (err || !st.isFile()) { res.writeHead(404).end(); return; }
+      res.writeHead(200, { ...headers, 'Content-Length': st.size }).end();
+    });
+    return true;
+  }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
+    res.writeHead(200, headers);
     res.end(data);
   });
   return true;
@@ -245,9 +254,10 @@ function handleRequest(req, res, deps) {
     });
     return;
   }
-  if (req.method === 'GET') {
+  if (req.method === 'GET' || req.method === 'HEAD') {
     if (!deps.allowedHosts.has(req.headers.host)) { res.writeHead(403).end(); return; }
     if (serveVendor(req, res)) return;
+    if (req.method === 'HEAD') { res.writeHead(405).end(); return; } // HEAD solo para /vendor/
     return serveStatic(req, res, deps.token);
   }
   res.writeHead(405).end();

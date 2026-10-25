@@ -418,7 +418,7 @@ Es pegamento del navegador: se verifica a mano.
     - `toggleCam()`, con el botón `CÁMARA · ON/OFF` y la tecla **C** (ignorada si el foco está en `#text-input` o en estado `boot`);
     - `onGesture(ev)`: despacha a la tarea 11 (pellizco) y a la tarea 12 (giros).
 
-- [ ] **Step 1: Implement `hands.js`.**
+- [x] **Step 1: Implement `hands.js`.**
   - `getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false })` sobre un `<video muted playsinline>` que **no** se agrega al DOM.
   - `const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs')` (un `import()` dinámico funciona desde el script clásico).
   - `FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm')`.
@@ -426,7 +426,7 @@ Es pegamento del navegador: se verifica a mano.
   - Antes de crear la tarea, hace un `HEAD` al modelo: un `404` da `'no-model'`.
   - El bucle de detección corre a **15 fps** (`DETECT_MS = 66`), con `setTimeout` encadenado. Se pausa con `document.hidden`. Pasa `unmirror(result.landmarks[0])` o `null`.
   - `stop()` corta los tracks (se apaga la luz de la cámara) y cierra el landmarker.
-- [ ] **Step 2: Implement la glue en `app.js`.**
+- [x] **Step 2: Implement la glue en `app.js`.**
   - Arranca la cámara al terminar `boot()`, si `app.camOn`.
   - El indicador `#hand-state` muestra `MANO DETECTADA`, `SIN MANO`, `CÁMARA APAGADA` o `GESTOS NO DISPONIBLES: <motivo>`. En `no-model`, el motivo es `corré npm run modelo`.
   - En el evento `replaced` llama a `JarvisHands.stop()`.
@@ -439,7 +439,16 @@ Es pegamento del navegador: se verifica a mano.
   - Con `vendor/hand_landmarker.task` renombrado, el indicador muestra `no-model`.
   - Con `?debug`, mover la mano hacia tu izquierda: los `x` que entrega `unmirror` bajan. Si suben, la webcam ya viene espejada: anotarlo y documentar el ajuste (invertir `unmirror` en `hands.js`).
   - Al abrir una segunda pestaña, la primera apaga la cámara.
-- [ ] **Step 4: Run** `npm test`. Expected: PASS (sin cambios en Node).
+
+  *Hecho sin cámara real (2026-10-25)*, con Chrome headless por CDP, la cámara falsa de Chrome (`--use-fake-device-for-media-stream`) y el micrófono y la voz apagados:
+  - MediaPipe, el `.wasm` y el modelo salen de `127.0.0.1` con los tipos `text/javascript`, `application/wasm` y `application/octet-stream`. No hubo pedidos a `jsdelivr` ni a `googleapis.com`, salvo las fuentes.
+  - **La telemetría existe y se intenta mandar**: al apagar la cámara (cierre del landmarker) la consola mostró `Connecting to 'https://odml.pa.googleapis.com/v1/log' violates … "connect-src 'self'". The action has been blocked.` La CSP la frena y MediaPipe sigue andando.
+  - `C` apaga y prende, el botón cambia, `jarvis.camOn` queda en `false` y sobrevive a F5.
+  - Permiso denegado (`--deny-permission-prompts`): `GESTOS NO DISPONIBLES: SIN PERMISO DE CÁMARA`, estado `EN ESPERA`. Con el modelo renombrado: `GESTOS NO DISPONIBLES: corré npm run modelo`.
+  - `detectForVideo` en headless (WebGL por software): de 34 a 52 ms por cuadro a 15 fps. Con la GPU real debería ser menos: lo mide la persona.
+  - *Corrección:* el `HEAD` al modelo daba 405 (el servidor solo atendía GET). Ahora `HEAD` vale para `/vendor/` y responde con `fs.stat`, sin leer el archivo (test `HEAD /vendor dice si está el modelo…`).
+  - Queda para la persona, con la cámara de verdad: la luz de la cámara, el permiso pedido una sola vez, la dirección de `x` con `?debug` y la segunda pestaña.
+- [x] **Step 4: Run** `npm test`. Expected: PASS (sin cambios en Node).
 - [ ] **Step 5: Commit** `git commit -m "Cámara y seguimiento de manos en el navegador"`
 
 ### Task 11: Pellizco sobre el núcleo y núcleo chiquito

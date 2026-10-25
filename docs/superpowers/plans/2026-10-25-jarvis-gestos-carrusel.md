@@ -96,7 +96,7 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `parseOpenMeteo(json) -> { place: string, current: { temp, feels, humidity, wind, code, label, isDay: boolean, precip }, days: [{ date: 'AAAA-MM-DD', code, label, max, min, rainProb }] }`. Lanza `Error(json.reason)` si `json.error`.
   - `fetchWeather({ fetchFn = fetch, place = BA } = {}) -> Promise<ReturnType<parseOpenMeteo>>`. Lanza un error si `!res.ok`.
 
-- [ ] **Step 1: Write the failing tests.** Usar como fixture la respuesta real verificada arriba, recortada:
+- [x] **Step 1: Write the failing tests.** Usar como fixture la respuesta real verificada arriba, recortada:
   - `weatherUrl()` es igual a `'https://api.open-meteo.com/v1/forecast?latitude=-34.6037&longitude=-58.3816&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FArgentina%2FBuenos_Aires&forecast_days=5'`.
   - `parseOpenMeteo(FIXTURE)`:
     - `.current` es igual a `{ temp: 15.9, feels: 12.5, humidity: 48, wind: 14.5, code: 1, label: 'Mayormente despejado', isDay: true, precip: 0 }`.
@@ -105,8 +105,8 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `parseOpenMeteo({ error: true, reason: 'x' })` lanza `/x/`.
   - `weatherLabel(0) === 'Despejado'`, `weatherLabel(95) === 'Tormenta'` y `weatherLabel(1234) === '—'`.
   - `fetchWeather({ fetchFn: async () => ({ ok: false, status: 503 }) })` rechaza con `/503/`.
-- [ ] **Step 2: Run** `node --test test/weather.test.js`. Expected: FAIL (`Cannot find module '../src/feeds/weather'`).
-- [ ] **Step 3: Implement.** Tabla de etiquetas:
+- [x] **Step 2: Run** `node --test test/weather.test.js`. Expected: FAIL (`Cannot find module '../src/feeds/weather'`).
+- [x] **Step 3: Implement.** Tabla de etiquetas:
 
   | Códigos | Etiqueta |
   |---|---|
@@ -128,8 +128,8 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   | 96, 99 | Tormenta con granizo |
 
   Armar la URL con `URLSearchParams` y respetar el orden de arriba.
-- [ ] **Step 4: Run** `npm test`. Expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Clima de Buenos Aires desde Open-Meteo"`
+- [x] **Step 4: Run** `npm test`. Expected: PASS.
+- [x] **Step 5: Commit** `git commit -m "Clima de Buenos Aires desde Open-Meteo"`
 
 ### Task 3: Calendar y Gmail por una query aparte (`src/feeds/google.js`)
 

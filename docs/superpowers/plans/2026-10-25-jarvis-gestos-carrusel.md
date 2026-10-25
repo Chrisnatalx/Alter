@@ -390,14 +390,14 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `agoLabel(updatedAt: number|null, now: number) -> string`: `'SIN DATOS'`, `'ACTUALIZADO RECIÉN'` (< 1 min) o `'ACTUALIZADO HACE N MIN'`. Desde 60 minutos, `'ACTUALIZADO HACE N H'`.
   - `viewPayload(face, { shownInbox, week }) -> object|null`: `null` para `core`. Para `mail`, `{ face:'mail', threads: shownInbox.map(({id,from,subject,unread}) => …) }`. Para `calendar`, `{ face:'calendar', week }`. Para `weather`, `{ face:'weather' }`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `navigate`: `core` con `left` da `calendar`, `mail` con `left` da `core` y `core` con `right` da `mail`. `calendar` con `up` da `{face:'weather', from:'calendar'}`, y con `down` vuelve a `{face:'calendar'}`. `weather` con `left` no cambia y `core` con `down` no cambia.
   - `agoLabel(null, 0) === 'SIN DATOS'`, `agoLabel(0, 30e3) === 'ACTUALIZADO RECIÉN'`, `agoLabel(0, 7*60e3) === 'ACTUALIZADO HACE 7 MIN'` y `agoLabel(0, 125*60e3) === 'ACTUALIZADO HACE 2 H'`.
   - `viewPayload uses the frozen list`: con `shownInbox` A y una caché que ya cambió a B, `viewPayload('mail', { shownInbox: A })` devuelve los ids de A en orden. `viewPayload('core', {})` es `null`.
-- [ ] **Step 2: Run** `node --test test/nav.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `npm test`. Expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Navegación del carrusel y datos de la vista"`
+- [x] **Step 2: Run** `node --test test/nav.test.js`. Expected: FAIL.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** `npm test`. Expected: PASS.
+- [x] **Step 5: Commit** `git commit -m "Navegación del carrusel y datos de la vista"`
 
 ### Task 10: Cámara y seguimiento de manos en el navegador (`public/hands.js`)
 

@@ -45,6 +45,8 @@ module.exports = Object.freeze({
   feedModel: process.env.JARVIS_FEED_MODEL || 'haiku',
   feedTimeoutMs: 120000,
   inboxSize: 8, // hilos de la bandeja que entran en la cara de Mail
+  feedIntervalMs: 10 * 60 * 1000, // cada 10 minutos, solo con la página abierta
+  feedStaleMs: 5 * 60 * 1000,     // al volver a la pestaña, se refresca si los datos tienen más de 5 minutos
   coreDir,
   publicDir: path.join(ROOT, 'public'),
 });

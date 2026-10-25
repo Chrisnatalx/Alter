@@ -206,20 +206,21 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
     - `snapshot()` devuelve `{ [kind]: { data|null, updatedAt: number|null, error: string|null, refreshing: boolean } }`.
     - `refresh` devuelve una Promise que nunca rechaza. Si el dato es más nuevo que `ifOlderMs`, no hace nada. Hay una sola carga por tipo a la vez: si ya hay una en curso, devuelve la misma Promise. Al terminar emite `feeds` con el `snapshot()`.
     - `start()` arma un intervalo (con `unref`) que llama a `refreshAll()` solo si `hasClient()`.
+    - *Agregado al implementar (lo pide la tarea 12):* `refresh(kind, { reason: 'write' })` hace que el evento `feeds` lleve `reason: 'write'`. Si llega mientras hay una carga en curso, se repite una vez al terminar, porque esa carga pudo empezar antes de la escritura.
   - `createFeedWatcher(onDirty: () => void) -> (event, data) => void`. Marca la sesión como «sucia» con un evento `tool` cuyo `data.app` es `'Gmail'` o `'Google Calendar'` y cuyo `data.action` no está en `READ_ACTIONS`. Con el siguiente `done` o `error` llama a `onDirty()` una vez y se limpia.
   - `READ_ACTIONS`: `list calendars`, `list events`, `get event`, `search events`, `suggest time`, `search threads`, `get thread`, `get message`, `list labels`, `list drafts` y `get draft` (con espacios, como los devuelve `describeTool`).
 
-- [ ] **Step 1: Write the failing tests**, con loaders falsos y un reloj inyectado:
+- [x] **Step 1: Write the failing tests**, con loaders falsos y un reloj inyectado:
   - `refresh stores data and emits feeds`: después de `await refresh('weather')`, `snapshot().weather.data` es el valor del loader, `updatedAt === now()` y el último evento emitido es `['feeds', snapshot()]`.
   - `concurrent refresh is single-flight`: dos `refresh('google')` seguidos llaman al loader 1 vez y devuelven la misma Promise.
   - `ifOlderMs skips fresh data`: con un dato de hace 1 minuto, `refresh('google', { ifOlderMs: 5*60e3 })` no llama al loader. Con un dato de hace 6 minutos, sí.
   - `failed refresh keeps previous data and records error`: si el loader rechaza con `Error('sin conectores')`, la data anterior se mantiene, `error === 'sin conectores'`, `refreshing === false` y la Promise resuelve sin rechazar.
   - `interval only refreshes with a client`: con timers falsos, si `hasClient` es `false` el tick no llama a ningún loader. Si es `true`, llama a todos.
   - `watcher fires once after a write turn`: con `('tool', {app:'Gmail', action:'send message'})`, `('delta',…)` y `('done',{})`, `onDirty` se llama 1 vez. Con `('tool', {app:'Gmail', action:'search threads'})` y `('done')`, 0 veces. Con `('tool', {app:'búsqueda web'})` y `('done')`, 0 veces.
-- [ ] **Step 2: Run** `node --test test/feeds-cache.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement `createFeedCache` y `createFeedWatcher`.**
-- [ ] **Step 4: Run** `npm test`. Expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Caché de feeds con refresco en segundo plano"`
+- [x] **Step 2: Run** `node --test test/feeds-cache.test.js`. Expected: FAIL.
+- [x] **Step 3: Implement `createFeedCache` y `createFeedWatcher`.**
+- [x] **Step 4: Run** `npm test`. Expected: PASS.
+- [x] **Step 5: Commit** `git commit -m "Caché de feeds con refresco en segundo plano"`
 
 ### Task 5: Rutas de feeds en el servidor
 

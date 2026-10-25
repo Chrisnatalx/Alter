@@ -12,6 +12,9 @@ const crypto = require('crypto');
 const config = require('./config');
 const { createEventHub } = require('./events');
 const { Session } = require('./session');
+const { createFeedCache, createFeedWatcher } = require('./feeds/cache');
+const { runGoogleRefresh } = require('./feeds/google');
+const { fetchWeather } = require('./feeds/weather');
 
 const PORT = config.port;
 
@@ -109,6 +112,26 @@ function handleEvents(req, res, deps) {
     // Confirmaciones que siguen esperando respuesta: la página recién conectada no las conoce
     for (const c of session.pendingConfirms?.() || []) deps.hub.emit('confirm', c);
   }
+  // Las vistas necesitan datos al día; recargar la página seguido no relanza la query cada vez
+  deps.feeds?.refreshAll({ ifOlderMs: 60000 });
+}
+
+// GET /api/feeds → lo último que se trajo de Calendar, Mail y Clima (cada uno con su hora y su error)
+function handleFeeds(req, res, deps) {
+  if (!deps.feeds) { res.writeHead(404).end(); return; }
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(deps.feeds.snapshot()));
+}
+
+// POST /api/feeds/refresh { kind?, ifOlderMs? } → 202 sin esperar: el resultado llega por el evento `feeds`
+const FEED_KINDS = new Set(['google', 'weather']);
+async function handleFeedsRefresh(req, res, deps) {
+  const payload = await readJson(req);
+  if (payload.kind !== undefined && !FEED_KINDS.has(payload.kind)) { res.writeHead(400).end(); return; }
+  if (!deps.feeds) { res.writeHead(404).end(); return; }
+  const ifOlderMs = typeof payload.ifOlderMs === 'number' ? payload.ifOlderMs : undefined;
+  if (payload.kind) deps.feeds.refresh(payload.kind, { ifOlderMs });
+  else deps.feeds.refreshAll({ ifOlderMs });
+  res.writeHead(202).end();
 }
 
 // POST /api/message { text, sessionId? } → 202. La respuesta llega por el canal de eventos.
@@ -139,10 +162,15 @@ async function handleNew(req, res, deps) {
   noContent(res);
 }
 
-// Rutas POST de la API: (req, res, deps) → promesa. Todas exigen isTrusted antes de llegar acá.
+// Rutas de la API: (req, res, deps). Todas exigen isTrusted antes de llegar acá.
+const GET_ROUTES = {
+  '/api/events': handleEvents,
+  '/api/feeds': handleFeeds,
+};
 const POST_ROUTES = {
   '/api/message': handleMessage,
   '/api/new': handleNew,
+  '/api/feeds/refresh': handleFeedsRefresh,
   '/api/interrupt': async (req, res, deps) => {
     await readJson(req);
     await liveSession(stateOf(deps))?.interrupt();
@@ -166,10 +194,10 @@ function handleRequest(req, res, deps) {
   const trust = { token: deps.token, allowedHosts: deps.allowedHosts };
   if (pathname.startsWith('/api/')) {
     if (!isTrusted(req, trust)) { res.writeHead(403).end(); return; }
-    if (req.method === 'GET' && pathname === '/api/events') return handleEvents(req, res, deps);
-    const route = req.method === 'POST' && POST_ROUTES[pathname];
+    const routes = req.method === 'GET' ? GET_ROUTES : req.method === 'POST' ? POST_ROUTES : {};
+    const route = Object.hasOwn(routes, pathname) && routes[pathname];
     if (!route) { res.writeHead(404).end(); return; }
-    route(req, res, deps).catch((err) => {
+    Promise.resolve().then(() => route(req, res, deps)).catch((err) => {
       // JSON roto → 400; cualquier otra falla (p. ej. no se pudo arrancar la sesión) → 500
       if (res.headersSent) { res.end(); return; }
       res.writeHead(err instanceof SyntaxError ? 400 : 500).end();
@@ -185,14 +213,28 @@ function handleRequest(req, res, deps) {
 }
 
 const hub = createEventHub();
+// Datos de las vistas: Clima de Open-Meteo y Calendar + Gmail por una query de solo lectura aparte
+const feeds = createFeedCache({
+  loaders: {
+    google: () => loadSdk().then((sdk) => runGoogleRefresh({ queryFn: sdk.query, config })),
+    weather: () => fetchWeather(),
+  },
+  intervalMs: config.feedIntervalMs,
+  hasClient: hub.hasClient,
+  emit: hub.emit,
+});
+// Si JARVIS respondió, archivó o borró algo en Gmail o Calendar, al terminar el turno se refresca
+const watchFeeds = createFeedWatcher(() => feeds.refresh('google', { reason: 'write' }));
 const deps = {
   hub,
+  feeds,
   token: TOKEN,
   allowedHosts: ALLOWED_HOSTS,
   // Carga el SDK (ESM) una vez, crea la sesión con sus herramientas y la arranca.
   async sessionFactory(resumeId) {
     const sdk = await loadSdk();
-    const session = new Session({ config, emit: hub.emit, sdk });
+    const emit = (event, data) => { watchFeeds(event, data); hub.emit(event, data); };
+    const session = new Session({ config, emit, sdk });
     session.start({ resumeId });
     return session;
   },
@@ -206,6 +248,7 @@ server.listen(PORT, '127.0.0.1', () => {
   J.A.R.V.I.S. en línea → http://localhost:${PORT}
   Claude: ${config.claudeBin || 'incluido en el SDK'}
 `);
+  feeds.start();
 });
 
 module.exports = { server, PORT, isTrusted, handleRequest, serveStatic };

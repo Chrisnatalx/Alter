@@ -240,17 +240,18 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `sessionFactory` le pasa a `Session` un `emit` que primero llama al watcher (`createFeedWatcher(() => feeds.refresh('google'))`) y después a `hub.emit`.
   - En el callback de `server.listen` se llama a `feeds.start()`.
 
-- [ ] **Step 1: Write the failing tests** en `test/server.test.js`, con `mkDeps` extendido con un `feeds` falso que registra las llamadas:
+- [x] **Step 1: Write the failing tests** en `test/server.test.js`, con `mkDeps` extendido con un `feeds` falso que registra las llamadas:
   - `GET /api/feeds sin token da 403`.
   - `GET /api/feeds devuelve el snapshot`: `200` y `JSON.parse(res.body)` igual al snapshot falso.
   - `POST /api/feeds/refresh` con `{ kind: 'google' }` da `202` y llama a `refresh('google', { ifOlderMs: undefined })`. Con `{ ifOlderMs: 300000 }`, llama a `refreshAll({ ifOlderMs: 300000 })`. Con `{ kind: 'x' }`, da `400`.
   - `GET /api/events pide refresco si los datos tienen más de un minuto`: se llamó a `refreshAll({ ifOlderMs: 60000 })`.
   - Los tests actuales sin `feeds` siguen pasando.
-- [ ] **Step 2: Run** `node --test test/server.test.js`. Expected: FAIL en los tests nuevos.
-- [ ] **Step 3: Implement.** Sumar un mapa `GET_ROUTES` junto a `POST_ROUTES`, con `/api/events` y `/api/feeds`, para no encadenar `if`s. Los loaders de producción son `google: () => loadSdk().then((sdk) => runGoogleRefresh({ queryFn: sdk.query, config }))` y `weather: () => fetchWeather()`.
-- [ ] **Step 4: Run** `npm test`. Expected: PASS.
-- [ ] **Step 5: Verificación real (gasta 1 refresco).** Correr `npm start`, abrir la página y, en la consola del navegador, correr `fetch('/api/feeds',{headers:{'X-Jarvis-Token':document.querySelector('meta[name=jarvis-token]').content}}).then(r=>r.json())`. Expected: `weather.data.current` con datos. `google.data.days` tiene 7 elementos e `inbox` tiene ≤ 8 hilos, o `google.error` explica la falla. En la terminal aparece la línea `[FEEDS] google …`.
-- [ ] **Step 6: Commit** `git commit -m "Endpoint de feeds y refresco al conectar"`
+- [x] **Step 2: Run** `node --test test/server.test.js`. Expected: FAIL en los tests nuevos.
+- [x] **Step 3: Implement.** Sumar un mapa `GET_ROUTES` junto a `POST_ROUTES`, con `/api/events` y `/api/feeds`, para no encadenar `if`s. Los loaders de producción son `google: () => loadSdk().then((sdk) => runGoogleRefresh({ queryFn: sdk.query, config }))` y `weather: () => fetchWeather()`.
+- [x] **Step 4: Run** `npm test`. Expected: PASS.
+- [x] **Step 5: Verificación real (gasta 1 refresco).** Correr `npm start`, abrir la página y, en la consola del navegador, correr `fetch('/api/feeds',{headers:{'X-Jarvis-Token':document.querySelector('meta[name=jarvis-token]').content}}).then(r=>r.json())`. Expected: `weather.data.current` con datos. `google.data.days` tiene 7 elementos e `inbox` tiene ≤ 8 hilos, o `google.error` explica la falla. En la terminal aparece la línea `[FEEDS] google …`.
+  *Hecho el 2026-10-25* con un script de Node en vez de la consola del navegador (mismo token, mismo `/api/events` y `/api/feeds`): Clima con datos y 5 días; Google con 7 días, 8 hilos y 8 eventos; `[FEEDS] google 21.6 s · 7 turnos · US$0.0076`. El evento `feeds` llegó a los 26,5 s de conectar (incluye la sonda de herramientas). `/api/feeds` sin token dio 403.
+- [x] **Step 6: Commit** `git commit -m "Endpoint de feeds y refresco al conectar"`
 
 ### Task 6: Contexto de la vista en el mensaje
 

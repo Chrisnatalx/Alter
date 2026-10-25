@@ -39,7 +39,7 @@ function fakeReq(method, url, body, headers = {}) {
 function fakeRes() {
   const res = { status: null, body: '', done: null };
   res.finished = new Promise((r) => { res.done = r; });
-  res.writeHead = (s) => { res.status = s; return res; };
+  res.writeHead = (s, h) => { res.status = s; res.headers = h || {}; return res; };
   res.write = (c) => { res.body += c; return true; };
   res.end = (c) => { if (c) res.body += c; res.done(); return res; };
   res.on = () => res;
@@ -198,6 +198,57 @@ test('serveStatic: una ruta mal codificada (/%) da 400 y no tira el servidor', a
   assert.equal(res.status, 400);
   const viaRoute = await call(mkDeps(fakeSession()), 'GET', '/%E0%A4%A');
   assert.equal(viaRoute.status, 400);
+});
+
+// ---- Feeds (Calendar, Mail y Clima de las vistas) ----
+function fakeFeeds() {
+  const calls = [];
+  const snap = { google: { data: null, updatedAt: null, error: null, refreshing: false }, weather: { data: { current: { temp: 15 } }, updatedAt: 1, error: null, refreshing: false } };
+  return {
+    calls, snap,
+    snapshot: () => snap,
+    refresh: (kind, opts) => { calls.push(['refresh', kind, opts]); return Promise.resolve(); },
+    refreshAll: (opts) => { calls.push(['refreshAll', opts]); return Promise.resolve(); },
+  };
+}
+const withFeeds = (feeds) => ({ ...mkDeps(fakeSession()), feeds });
+
+test('GET /api/feeds sin token da 403', async () => {
+  const res = await call(withFeeds(fakeFeeds()), 'GET', '/api/feeds', undefined, { 'x-jarvis-token': '' });
+  assert.equal(res.status, 403);
+});
+
+test('GET /api/feeds devuelve el snapshot', async () => {
+  const feeds = fakeFeeds();
+  const res = await call(withFeeds(feeds), 'GET', '/api/feeds');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(res.body), feeds.snap);
+});
+
+test('GET /api/feeds sin feeds da 404', async () => {
+  assert.equal((await call(mkDeps(fakeSession()), 'GET', '/api/feeds')).status, 404);
+});
+
+test('POST /api/feeds/refresh pide el refresco sin esperarlo', async () => {
+  const feeds = fakeFeeds();
+  const deps = withFeeds(feeds);
+  assert.equal((await call(deps, 'POST', '/api/feeds/refresh', { kind: 'google' })).status, 202);
+  assert.deepEqual(feeds.calls.at(-1), ['refresh', 'google', { ifOlderMs: undefined }]);
+  assert.equal((await call(deps, 'POST', '/api/feeds/refresh', { ifOlderMs: 300000 })).status, 202);
+  assert.deepEqual(feeds.calls.at(-1), ['refreshAll', { ifOlderMs: 300000 }]);
+  assert.equal((await call(deps, 'POST', '/api/feeds/refresh', { kind: 'x' })).status, 400);
+  assert.equal(feeds.calls.length, 2);
+});
+
+test('GET /api/events pide refresco si los datos tienen más de un minuto', async () => {
+  const feeds = fakeFeeds();
+  await call(withFeeds(feeds), 'GET', '/api/events');
+  assert.deepEqual(feeds.calls, [['refreshAll', { ifOlderMs: 60000 }]]);
+});
+
+test('GET /api/events sin feeds sigue andando', async () => {
+  assert.equal((await call(mkDeps(fakeSession()), 'GET', '/api/events')).status, 200);
 });
 
 test('GET /api/events reenvía las confirmaciones pendientes', async () => {

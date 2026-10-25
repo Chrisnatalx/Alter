@@ -578,3 +578,18 @@ Corrido el 2026-10-25 con `haiku` (`claude-haiku-5-5`), SDK 0.3.296. Tres querie
 - haiku devolvió `start` y `end` con offset (`AAAA-MM-DDTHH:MM:SS-03:00`) o en UTC (`…Z`). El evento de día completo **no** vino como `AAAA-MM-DD`: el prompt de la tarea 3 lo pide explícito y `groupWeek` acepta las dos formas.
 - La duración (≈ 25 s) no importa: corre en segundo plano.
 - Con un refresco cada 10 minutos y la página abierta: ≈ US$0,045 por hora a precio de lista. En la suscripción eso consume cupo, no se cobra aparte.
+
+## Revisión de código (2026-10-25)
+
+Correcciones de una revisión independiente, aplicadas después de la tarea 13:
+
+- **Solo lectura a prueba de fallas** (`src/feeds/google.js`): el `system/init` tiene que traer solo `READ_TOOLS` (y `StructuredOutput`); una herramienta de más corta el refresco. Un `canUseTool` propio deniega todo lo demás. La sonda tiene un tope total de tiempo.
+- **Solo conectan Gmail y Calendar:** `settings.allowedMcpServers` con `serverUrl` `https://gmailmcp.googleapis.com/*` y `https://calendarmcp.googleapis.com/*`. Probado con sondas sin modelo: con `serverName` (`claude.ai Gmail`, `claude_ai_Gmail` o `Gmail`) la política bloquea **todos** los conectores de claude.ai; con `serverUrl` quedan solo esos dos, y el plugin de Discord, `crm` y los demás MCP no arrancan. `managedSettings` no tuvo efecto. `deniedMcpServers` por nombre también funciona, pero exige conocer los nombres. Si algún día hay un nivel de configuración administrado por la empresa con su propio `allowedMcpServers`, manda ese.
+- Con la lista blanca los conectores tardan en conectar y el `init` llegaba sin ellos: el refresco ahora usa entrada en streaming y manda el prompt recién cuando `mcpServerStatus()` muestra Gmail y Calendar `connected` (tope 20 s).
+- El SDK avisa en cada query `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`: es a propósito (las de lectura van preaprobadas y `canUseTool` es la segunda llave). Se silencia solo ese aviso.
+- **Feeds:** después de un error, los refrescos de rutina esperan 2 minutos (`lastErrorAt`); el de una escritura pasa. La sesión emite `tool_result` (`ok` o con error) y el vigilante refresca solo si la escritura corrió y hay un navegador conectado.
+- **Vista de Mail:** los hilos viajan como JSON compacto (`{"n","id","from","subject","unread"}`), y el prompt pide leer el hilo con `get_thread` y comprobar el asunto antes de actuar. Si Mail se abrió sin datos, el primer refresco llena la lista (`nextFrozen` en `nav.js`).
+- **Fechas:** día de la semana en número; los eventos que cruzan la medianoche o empezaron antes del lunes aparecen en cada día que tocan; «hoy» sale de la zona del servidor.
+- **Gestos:** el pellizco espera a la mano estable, los giros esperan `stableMs` después de soltar un pellizco y el zoom sigue continuo después de soltar el agarre.
+- **Cámara:** sin carrera entre prender y apagar (el stream se guarda recién si la carga sigue vigente) y aviso de error si la cámara se desconecta.
+- Refrescos reales de esta ronda: 3 completos (US$0,0053 a US$0,0056) y 1 que cortó la guarda en el `init`. Ningún mensaje a la conversación de JARVIS.

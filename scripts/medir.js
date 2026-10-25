@@ -4,7 +4,7 @@
 // Seguridad: toda confirmación se rechaza (allow:false) y, si el servidor llega a permitir un envío,
 // el guion corta y sale con código 2. Consume cupo de tu cuenta y puede abrir pestañas.
 //
-//   MEDIR_CONFIG=base JARVIS_MODEL=<id> [JARVIS_MCP_FILTER=1] [JARVIS_PROMPT_PREAMBLE=1] [MEDIR_DELEGACION=1] node scripts/medir.js
+//   MEDIR_CONFIG=base JARVIS_MODEL=<id> [JARVIS_MCP_FILTER=0] [JARVIS_PROMPT_PREAMBLE=0] [MEDIR_DELEGACION=1] node scripts/medir.js
 //   node scripts/medir.js --comparar logs/medicion-a.json logs/medicion-b.json …
 //   node scripts/medir.js --voz logs/tiempos.jsonl
 
@@ -197,7 +197,7 @@ async function run() {
   const summary = summarizeRuns(records);
   const out = {
     config: env.MEDIR_CONFIG,
-    env: { JARVIS_MODEL: env.JARVIS_MODEL, JARVIS_MCP_FILTER: env.JARVIS_MCP_FILTER, JARVIS_PROMPT_DIRECT: env.JARVIS_PROMPT_DIRECT, JARVIS_PROMPT_PREAMBLE: env.JARVIS_PROMPT_PREAMBLE },
+    env: { JARVIS_MODEL: env.JARVIS_MODEL, JARVIS_MCP_FILTER: env.JARVIS_MCP_FILTER, JARVIS_PROMPT_PREAMBLE: env.JARVIS_PROMPT_PREAMBLE },
     model: st.model,
     records,
     summary,

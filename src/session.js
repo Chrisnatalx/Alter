@@ -9,6 +9,8 @@ const { startTurnTiming, trackMessage, summarizeTiming } = require('./timing');
 const { missingKeptServers, keptConnectorsSettled } = require('./mcp-filter');
 
 const MCP_WAIT_MS = 10000; // tope para esperar los conectores conservados antes del primer mensaje
+// Un turno que arranca hasta este tiempo después del anterior es el de un mensaje que el SDK tenía en cola
+const QUEUED_TURN_MS = 1500;
 const crypto = require('crypto');
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -98,7 +100,8 @@ function mapMessage(msg, state) {
 }
 
 class Session {
-  constructor({ config, emit, sdk, queryFn = sdk.query, timingLog, now = Date.now }) {
+  constructor({ config, emit, sdk, queryFn = sdk.query, timingLog, now = Date.now, mcpWaitMs = MCP_WAIT_MS }) {
+    this.mcpWaitMs = mcpWaitMs;
     this.config = config;
     this.emit = emit;
     this.queryFn = queryFn;
@@ -113,6 +116,8 @@ class Session {
     this.timingLog = timingLog || { write() {} };
     this.now = now;
     this.receivedAts = [];
+    this.carriedAts = []; // llegaron con un turno en curso: valen solo si el turno siguiente arranca enseguida
+    this.lastTurnEndAt = null;
     this.timing = null;
     this.turnNo = 0;
     this.sessionLogged = false;
@@ -141,11 +146,23 @@ class Session {
   async *_afterKeptConnectors(iterable) {
     try {
       await Promise.resolve(); // this.q queda asignado apenas vuelve queryFn
-      const until = Date.now() + MCP_WAIT_MS;
+      const until = Date.now() + this.mcpWaitMs;
+      const TIMEOUT = Symbol('tope');
+      // El pedido de estado no tiene tope propio: cada llamada compite con lo que queda del tope total
+      const withinCap = (p) => {
+        let timer;
+        const cap = new Promise((r) => { timer = setTimeout(() => r(TIMEOUT), Math.max(0, until - Date.now())); });
+        return Promise.race([p, cap]).finally(() => clearTimeout(timer));
+      };
       for (;;) {
-        this.mcpStatus = (await this.q.mcpServerStatus()) || [];
+        const status = await withinCap(this.q.mcpServerStatus());
+        if (status === TIMEOUT) break;
+        this.mcpStatus = status || [];
         if (keptConnectorsSettled(this.mcpStatus) || Date.now() >= until) break;
         await new Promise((r) => setTimeout(r, 100));
+      }
+      if (!keptConnectorsSettled(this.mcpStatus)) {
+        console.warn(`  [AVISO] Los conectores no terminaron de conectar en ${Math.round(this.mcpWaitMs / 1000)} s: sigo sin esperarlos.`);
       }
     } catch { /* sin mcpServerStatus: se sigue igual, el aviso sale del init */ }
     yield* iterable;
@@ -160,6 +177,7 @@ class Session {
         if (msg.type === 'system' && msg.subtype === 'init') this._startTiming(msg, at);
         trackMessage(this.timing, msg, at);
         if (msg.type === 'result' && this.timing) this._finishTiming(); // antes del done o error del turno
+        if (msg.type === 'result') this._endTurnArrivals(at);
         if (!this._closed) for (const [event, data] of events) this.emit(event, data);
       }
       if (!this._closed) this.emit('error', { message: 'La sesión terminó inesperadamente.' });
@@ -176,17 +194,29 @@ class Session {
     if (!this.sessionLogged) { this.sessionLogged = true; this._logSession(init); }
     if (this.state.turnOrigin !== 'user') { this.timing = null; return; }
     this.pushed = [];
+    // Lo que llegó con el turno anterior en curso solo vale si este turno arrancó apenas terminó aquel (el SDK
+    // lo tenía en cola); si no, ese mensaje se sumó al turno anterior y medir desde ahí inflaría los tiempos.
+    const queuedNext = this.lastTurnEndAt != null && at - this.lastTurnEndAt <= QUEUED_TURN_MS;
+    const pool = queuedNext ? [...this.receivedAts, ...this.carriedAts] : this.receivedAts;
+    this.carriedAts = [];
     // Si un turno responde varios mensajes, se cuenta desde el primero que llegó
-    this.timing = startTurnTiming(this.receivedAts.length ? Math.min(...this.receivedAts) : at);
+    this.timing = startTurnTiming(pool.length ? Math.min(...pool) : at);
     this.receivedAts = [];
     this.turnNo++;
+  }
+
+  // Al terminar cualquier turno, lo que llegó mientras corría queda aparte hasta saber de quién es
+  _endTurnArrivals(at) {
+    this.carriedAts = this.receivedAts;
+    this.receivedAts = [];
+    this.lastTurnEndAt = at;
   }
 
   _finishTiming() {
     const payload = { turn: this.turnNo, model: this.state.model, ...summarizeTiming(this.timing) };
     this.timing = null;
     if (!this._closed) this.emit('timing', payload);
-    const flags = { mcpFilter: !!this.config.mcpFilter, promptDirect: !!this.config.promptDirect, promptPreamble: !!this.config.promptPreamble };
+    const flags = { mcpFilter: !!this.config.mcpFilter, promptPreamble: !!this.config.promptPreamble };
     this.timingLog.write({ tipo: 'servidor', fecha: new Date().toISOString(), ...payload, flags });
   }
 
@@ -220,7 +250,7 @@ class Session {
     const st = this.state;
     const local = this.queue.clear(); // lo que no salió hacia el SDK no debe salir nunca
     this.pushed = this.pushed.filter((id) => !local.includes(id));
-    if (!this.q) { st.userSince = false; this.receivedAts = []; return; }
+    if (!this.q) { st.userSince = false; this.receivedAts = []; this.carriedAts = []; return; }
     // Un uuid ya consumido o inexistente rechaza la cancelación: no importa
     const cancel = (ids) => Promise.all(ids.map((id) => Promise.resolve().then(() => this.q.cancelAsyncMessage(id)).catch(() => {})));
     if (st.turnActive && st.turnOrigin !== 'task') {
@@ -238,7 +268,7 @@ class Session {
       await cancel(this.pushed.splice(0));
     }
     st.userSince = false; // lo que esperaba su turno se descartó: el próximo turno no es de la persona
-    this.receivedAts = []; // ni se mide desde esos mensajes
+    this.receivedAts = []; this.carriedAts = []; // ni se mide desde esos mensajes
   }
 
   async stopTask(taskId) { await this.q?.stopTask(taskId); }

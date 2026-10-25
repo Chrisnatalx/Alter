@@ -20,7 +20,7 @@ function buildAgentOptions({ config, canUseTool, mcpServers, abortController }) 
     perTaskStopAffordance: true,         // interrupt() corta solo el turno actual; las tareas en segundo plano siguen
   };
   // Solo los conectores que JARVIS conserva (src/mcp-filter.js); permisos y confirmaciones no cambian
-  if (config.mcpFilter) options.settings = { ...options.settings, ...buildMcpFilterSettings() };
+  if (config.mcpFilter) options.settings = { ...options.settings, ...buildMcpFilterSettings({ home: config.claudeHome }) };
   if (abortController) options.abortController = abortController;
   if (config.claudeBin) options.pathToClaudeCodeExecutable = config.claudeBin;
   if (config.model) options.model = config.model;

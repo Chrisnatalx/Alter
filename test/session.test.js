@@ -113,6 +113,8 @@ function fakeQuery(script = []) {
 }
 const fakeSdk = { createSdkMcpServer: () => ({}), tool: () => ({}) };
 const config = { timezone: 'America/Argentina/Buenos_Aires', confirmTimeoutMs: 5000, googleAccount: '' };
+// Con el filtro, las pruebas no leen el ~/.claude real: una carpeta que no existe
+const NO_HOME = require('node:path').join(require('node:os').tmpdir(), 'jarvis-sin-home-' + process.pid);
 const tick = () => new Promise((r) => setImmediate(r));
 
 test('Session emite los eventos de la query', async () => {
@@ -420,7 +422,7 @@ test('con el filtro, el primer mensaje espera a que los conectores conservados t
     async toggleMcpServer() { throw new Error('no se usa nunca'); },
     close() {},
   });
-  const s = new Session({ config: { ...config, mcpFilter: true }, emit: () => {}, sdk: fakeSdk, queryFn, timingLog: log });
+  const s = new Session({ config: { ...config, mcpFilter: true, claudeHome: NO_HOME }, emit: () => {}, sdk: fakeSdk, queryFn, timingLog: log });
   s.send('hola');
   s.start({});
   for (let i = 0; i < 50 && askedWhenFirst === null; i++) await new Promise((r) => setTimeout(r, 20));
@@ -431,12 +433,34 @@ test('con el filtro, el primer mensaje espera a que los conectores conservados t
   s.close();
 });
 
+test('con el filtro, si mcpServerStatus nunca contesta el primer mensaje sale igual al vencer el tope', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const warn = t.mock.method(console, 'warn', () => {});
+  let delivered = false;
+  const queryFn = ({ prompt }) => ({
+    async *[Symbol.asyncIterator]() {
+      await prompt[Symbol.asyncIterator]().next();
+      delivered = true;
+      await new Promise(() => {});
+    },
+    mcpServerStatus: () => new Promise(() => {}), // nunca contesta
+    close() {},
+  });
+  const s = new Session({ config: { ...config, mcpFilter: true, claudeHome: NO_HOME }, emit: () => {}, sdk: fakeSdk, queryFn, mcpWaitMs: 50 });
+  s.send('hola');
+  s.start({});
+  for (let i = 0; i < 30 && !delivered; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(delivered, true);
+  assert.ok(warn.mock.calls.some((c) => /no terminaron de conectar/.test(c.arguments[0])));
+  s.close();
+});
+
 test('con el filtro de MCP, el registro sesion lista los conservados que faltan y avisa', async (t) => {
   t.mock.method(console, 'log', () => {});
   const warn = t.mock.method(console, 'warn', () => {});
   const { queryFn } = fakeQuery([initFull, success]);
   const log = spyLog();
-  const s = new Session({ config: { ...config, mcpFilter: true }, emit: () => {}, sdk: fakeSdk, queryFn, timingLog: log });
+  const s = new Session({ config: { ...config, mcpFilter: true, claudeHome: NO_HOME }, emit: () => {}, sdk: fakeSdk, queryFn, timingLog: log });
   s.start({});
   await tick();
   const sesion = log.records.find((r) => r.tipo === 'sesion');
@@ -457,6 +481,60 @@ test('timing: turno de tarea no se mide', async (t) => {
   assert.ok(events.includes('done'));
   assert.ok(!events.includes('timing'));
   assert.equal(log.records.filter((r) => r.tipo === 'servidor').length, 0);
+  s.close();
+});
+
+// query manejada a mano: cada push() entrega un mensaje del SDK y espera a que la sesión lo procese
+function manualQuery() {
+  const pending = [];
+  let wake = null;
+  const queryFn = () => ({
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        while (pending.length) yield pending.shift();
+        await new Promise((r) => { wake = r; });
+      }
+    },
+    close() {},
+  });
+  const push = async (msg) => { pending.push(msg); if (wake) { const w = wake; wake = null; w(); } await tick(); };
+  return { queryFn, push };
+}
+
+test('timing: un mensaje que se absorbió en el turno anterior no cuenta para el siguiente', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { queryFn, push } = manualQuery();
+  const events = [];
+  let clock = 0;
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn, timingLog: spyLog(), now: () => clock });
+  s.start({});
+  s.send('a', { receivedAt: 1000 });
+  clock = 1100; await push(init);
+  s.send('b', { receivedAt: 1500 }); // llega con el turno en curso y el SDK lo suma a ese turno
+  clock = 2000; await push(success);
+  s.send('c', { receivedAt: 5000 });
+  clock = 5200; await push(init);
+  clock = 6000; await push(success);
+  const timings = events.filter(([e]) => e === 'timing').map(([, d]) => d);
+  assert.equal(timings[1].initMs, 200); // desde «c», no desde «b» (sería 3700)
+  s.close();
+});
+
+test('timing: un mensaje en cola que arranca el turno siguiente enseguida sí cuenta desde que llegó', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { queryFn, push } = manualQuery();
+  const events = [];
+  let clock = 0;
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn, timingLog: spyLog(), now: () => clock });
+  s.start({});
+  s.send('a', { receivedAt: 1000 });
+  clock = 1100; await push(init);
+  s.send('b', { receivedAt: 1500 }); // queda en cola del SDK
+  clock = 2000; await push(success);
+  clock = 2050; await push(init); // el SDK arranca el turno de «b» apenas termina el anterior
+  clock = 3000; await push(success);
+  const timings = events.filter(([e]) => e === 'timing').map(([, d]) => d);
+  assert.equal(timings[1].initMs, 550);
   s.close();
 });
 

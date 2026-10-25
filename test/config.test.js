@@ -31,6 +31,7 @@ test('el filtro de MCP está prendido salvo con JARVIS_MCP_FILTER=0', () => {
   assert.equal(configWith({ JARVIS_MCP_FILTER: '' }, 'mcpFilter'), true);
   assert.equal(configWith({ JARVIS_MCP_FILTER: '1' }, 'mcpFilter'), true);
   assert.equal(configWith({ JARVIS_MCP_FILTER: '0' }, 'mcpFilter'), false);
+  for (const off of ['false', 'no', 'off', 'OFF', ' No ']) assert.equal(configWith({ JARVIS_MCP_FILTER: off }, 'mcpFilter'), false, off);
 });
 
 test('JARVIS_TIMEZONE válida se respeta sin avisos', () => {

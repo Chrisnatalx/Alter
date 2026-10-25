@@ -5,7 +5,12 @@ require('../env');
 const fs = require('fs');
 const path = require('path');
 
+const os = require('os');
+
 const ROOT = path.join(__dirname, '..');
+
+// Una variable de prendido/apagado está apagada con 0, false, no u off (sin importar mayúsculas ni espacios)
+const isOff = (value) => ['0', 'false', 'no', 'off'].includes(String(value ?? '').trim().toLowerCase());
 
 // Ubica el ejecutable de Claude Code instalado (el mismo que usás en la terminal).
 // Si no se encuentra, el SDK usa el que trae incluido.
@@ -42,9 +47,10 @@ module.exports = Object.freeze({
   claudeBin: resolveClaudeBin(),
   confirmTimeoutMs: 2 * 60 * 1000, // sin respuesta en 2 minutos → se deniega
   // Solo los conectores que JARVIS conserva (Gmail, Calendar, Drive, GitHub y Discord); '0' carga todos los de la cuenta
-  mcpFilter: process.env.JARVIS_MCP_FILTER !== '0',
+  mcpFilter: !isOff(process.env.JARVIS_MCP_FILTER),
+  claudeHome: os.homedir(), // de acá se leen (solo lectura) los plugins instalados para el filtro
   // Una frase corta antes de cada herramienta, para que la voz arranque antes; '0' lo apaga
-  promptPreamble: process.env.JARVIS_PROMPT_PREAMBLE !== '0',
+  promptPreamble: !isOff(process.env.JARVIS_PROMPT_PREAMBLE),
   // Registro local de tiempos por turno (JSONL); '0' lo apaga
   timingLog: process.env.JARVIS_TIMING_LOG === '0' ? '' : (process.env.JARVIS_TIMING_LOG || path.join(ROOT, 'logs', 'tiempos.jsonl')),
   coreDir,

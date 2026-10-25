@@ -369,7 +369,7 @@
     if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 350);
   }
 
-  async function ask(text, voice = {}) {
+  async function ask(text, inputMarks = {}) { // inputMarks: fin del habla y frase final, si vino por voz
     text = text.trim();
     if (!text) { setState('idle'); return; }
     if (app.replaced) return;
@@ -379,7 +379,7 @@
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
     addLog('user', text);
-    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: { ...window.JarvisTiming.emptyMarks(), ...voice } };
+    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: { ...window.JarvisTiming.emptyMarks(), ...inputMarks } };
     userBusy = true;
     setState('thinking');
     $('t-link').textContent = 'TRANSMITIENDO';

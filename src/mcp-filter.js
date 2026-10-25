@@ -22,20 +22,31 @@ const KEPT_CONNECTOR_URLS = [
 ];
 // Plugins con servidor MCP que se conservan: { plugin, server }
 const KEPT_PLUGIN_SERVERS = [{ plugin: 'discord', server: 'discord' }];
+const OFFICIAL_MARKETPLACE = 'claude-plugins-official';
 // Nombres que informa init.mcp_servers, para avisar si falta alguno
 const KEPT_MCP_SERVERS = ['claude.ai Gmail', 'claude.ai Google Calendar', 'claude.ai Google Drive', 'claude.ai GitHub', 'plugin:discord:discord'];
 const OWN_MCP_SERVERS = ['jarvis'];
 
+// La instalación de un plugin: primero la del marketplace oficial; entre sus instalaciones, las globales
+// (scope user) antes que las de un proyecto, y de esas la actualizada más recientemente.
+function pickInstall(installed, plugin) {
+  const keys = Object.keys(installed).filter((k) => k.startsWith(plugin + '@'));
+  const key = keys.find((k) => k === `${plugin}@${OFFICIAL_MARKETPLACE}`) || keys[0];
+  const list = (key && Array.isArray(installed[key]) ? installed[key] : []).filter((i) => i?.installPath);
+  const when = (i) => Date.parse(i.lastUpdated || i.installedAt || '') || 0;
+  return list.sort((a, b) => (b.scope === 'user') - (a.scope === 'user') || when(b) - when(a))[0];
+}
+
 // Comando exacto de cada plugin conservado, como lo arma la CLI: el de su .mcp.json con la carpeta instalada
 // (en barras normales). Si algo no está, ese plugin no se incluye: nunca lanza.
-function pluginServerCommands({ home = os.homedir(), readFile = (f) => fs.readFileSync(f, 'utf8') } = {}) {
+function pluginServerCommands({ home, readFile = (f) => fs.readFileSync(f, 'utf8') } = {}) {
+  home ||= os.homedir();
   const commands = [];
   let installed;
   try { installed = JSON.parse(readFile(path.join(home, '.claude', 'plugins', 'installed_plugins.json'))).plugins || {}; } catch { return commands; }
   for (const { plugin, server } of KEPT_PLUGIN_SERVERS) {
     try {
-      const key = Object.keys(installed).find((k) => k.startsWith(plugin + '@'));
-      const installPath = key && installed[key]?.[0]?.installPath;
+      const installPath = pickInstall(installed, plugin)?.installPath;
       if (!installPath) continue;
       const def = JSON.parse(readFile(path.join(installPath, '.mcp.json'))).mcpServers?.[server];
       if (!def?.command) continue;
@@ -58,9 +69,11 @@ function buildMcpFilterSettings(opts) {
 
 // ¿Ya terminaron de conectar (bien o mal) los conectores de claude.ai conservados? Con el filtro, el init llega
 // antes que ellos, y un primer turno sin sus herramientas termina delegando en un subagente (probado: 27 s).
+// Listo cuando ya llegó la lista de claude.ai y nada quedó `pending`. Si falta un conservado no se espera el
+// tope entero: el aviso de `faltan` lo informa.
 function keptConnectorsSettled(mcpStatus) {
-  const byName = new Map((mcpStatus || []).map((s) => [s.name, s.status]));
-  return KEPT_MCP_SERVERS.filter((n) => n.startsWith('claude.ai ')).every((n) => byName.has(n) && byName.get(n) !== 'pending');
+  const list = mcpStatus || [];
+  return list.some((s) => s.source === 'claudeai') && !list.some((s) => s.status === 'pending');
 }
 
 // Conservados o propios que no aparecen o no quedaron conectados (p. ej. un needs-auth o una URL que cambió)

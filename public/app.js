@@ -245,18 +245,20 @@
       .trim();
   }
 
-  function speak(text, standalone = false) {
+  // Devuelve true si la frase quedó en cola para sonar (onStart avisa cuando empieza)
+  function speak(text, standalone = false, onStart) {
     const clean = forSpeech(text);
-    if (!clean || !synth || app.muted) { if (standalone) return; maybeFinishSpeaking(); return; }
+    if (!clean || !synth || app.muted) { if (standalone) return false; maybeFinishSpeaking(); return false; }
     for (const w of words(clean)) spoken.add(w); // para reconocer su propio eco al interrumpir
     const u = new SpeechSynthesisUtterance(clean);
     if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = 'es-AR';
     u.rate = +rateEl.value; u.pitch = +pitchEl.value;
-    u.onstart = () => { app.voicePulse = 1; if (app.state === 'thinking') setState('speaking'); startBargeIn(); };
+    u.onstart = () => { app.voicePulse = 1; if (app.state === 'thinking') setState('speaking'); startBargeIn(); onStart?.(); };
     u.onboundary = () => { app.voicePulse = Math.min(1, app.voicePulse + 0.6); };
     u.onend = u.onerror = () => { pendingUtterances = Math.max(0, pendingUtterances - 1); maybeFinishSpeaking(); };
     pendingUtterances++;
     synth.speak(u);
+    return true;
   }
 
   function maybeFinishSpeaking() {
@@ -323,7 +325,18 @@
     body: JSON.stringify(body),
   });
 
-  // Turno de la persona en curso: { aiSpan, full, speakBuf, t0, firstToken }. null si no hay ninguno.
+  // Tiempos de voz del turno (lógica en timing.js): se reportan una vez, cuando están completos
+  function reportIfReady(turn) {
+    if (!turn || turn.reported || !window.JarvisTiming.isReportReady(turn)) return;
+    turn.reported = true;
+    const report = window.JarvisTiming.buildVoiceReport(turn.marks, turn.server);
+    const ms = report.speechEndToSpeechStartMs ?? report.postToSpeechStartMs; // un mensaje escrito no tiene fin del habla
+    $('t-voice').textContent = ms == null ? '— ms' : ms + ' ms';
+    $('t-voice').title = window.JarvisTiming.formatBreakdown(report);
+    post('/api/timing', report).catch(() => {});
+  }
+
+  // Turno de la persona en curso: { aiSpan, full, speakBuf, t0, firstToken, marks, server, ended }. null si no hay ninguno.
   let cur = null;
   let userBusy = false;    // el servidor está respondiendo a la persona (interrumpible)
   let turnOrigin = 'user'; // quién arrancó el turno que está llegando por el canal
@@ -356,7 +369,7 @@
     if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 350);
   }
 
-  async function ask(text) {
+  async function ask(text, voice = {}) {
     text = text.trim();
     if (!text) { setState('idle'); return; }
     if (app.replaced) return;
@@ -366,7 +379,7 @@
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
     addLog('user', text);
-    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
+    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: { ...window.JarvisTiming.emptyMarks(), ...voice } };
     userBusy = true;
     setState('thinking');
     $('t-link').textContent = 'TRANSMITIENDO';
@@ -379,6 +392,7 @@
       if (stale) await stale; // que el corte llegue al servidor antes que el mensaje nuevo
       if (seq !== askSeq) return; // ESC o una pregunta nueva mientras esperaba el corte: este mensaje ya no se manda
       cur = turn; // recién ahora: lo que llegue del turno cortado no se pinta como respuesta nueva
+      turn.marks.post = performance.now();
       const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok) throw new Error('El servidor respondió ' + res.status);
@@ -393,12 +407,21 @@
     const re = /[^.!?¿¡…\n]*[.!?…\n]+["')\]]*\s*/g;
     let m, last = 0;
     while ((m = re.exec(cur.speakBuf)) !== null) {
-      if (m[0].trim().length > 1) speak(m[0]);
+      if (m[0].trim().length > 1) speakTimed(m[0]);
       last = re.lastIndex;
       if (m.index === re.lastIndex) re.lastIndex++;
     }
     cur.speakBuf = cur.speakBuf.slice(last);
-    if (force && cur.speakBuf.trim()) { speak(cur.speakBuf); cur.speakBuf = ''; }
+    if (force && cur.speakBuf.trim()) { speakTimed(cur.speakBuf); cur.speakBuf = ''; }
+  }
+
+  // La primera frase del turno marca cuándo entró en cola y cuándo empezó a sonar
+  function speakTimed(text) {
+    const turn = cur;
+    const m = turn.marks;
+    if (!m || m.firstQueued != null) { speak(text); return; }
+    const queued = performance.now();
+    if (speak(text, false, () => { if (m.speechStart == null) { m.speechStart = performance.now(); reportIfReady(turn); } })) m.firstQueued = queued;
   }
 
   // El turno de la persona no pudo completarse (error del servidor o enlace caído)
@@ -478,7 +501,7 @@
           dropRec();
           spoken = new Set();
           $('sub-ai').textContent = '';
-          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true };
+          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: window.JarvisTiming.emptyMarks() };
           userBusy = true; streamDone = false;
           setState('thinking');
           $('t-link').textContent = 'TRANSMITIENDO';
@@ -500,6 +523,10 @@
         break;
       case 'tool':
         if (!staleTurn) $('t-action').textContent = data.app.toUpperCase();
+        break;
+      case 'timing': // tiempos del servidor de este turno: llegan justo antes de su done
+        if (staleTurn || turnOrigin === 'task' || !cur || data.interrupted) break; // un turno cortado no se reporta
+        cur.server = data; reportIfReady(cur);
         break;
       case 'open':
         addLog('sys', 'Abrí: ' + data.url);
@@ -546,6 +573,7 @@
         }
         if (data.interrupted && cur) break; // cierre tardío de un turno cortado: la pregunta vigente sigue esperando
         flushSentences(true);
+        if (cur) { cur.ended = true; reportIfReady(cur); } // la referencia queda en las marcas de la voz
         if (!data.interrupted) app.turns++;
         updateTelemetry();
         $('t-link').textContent = 'ESTABLE';
@@ -706,6 +734,7 @@
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
   let heard = '';
+  let lastResultAt = null; // último resultado del reconocedor: aproxima cuándo dejó de hablar la persona
   let recErrors = 0; // errores seguidos (p. ej. sin red): espaciamos los reintentos
 
   async function ensureMicMeter() {
@@ -737,13 +766,14 @@
     stopBargeIn();
     interrupt(true); // hablar encima de JARVIS lo interrumpe
     ensureMicMeter();
-    heard = '';
+    heard = ''; lastResultAt = null;
     rec = new SR();
     rec.lang = 'es-AR';
     rec.interimResults = true;
     rec.continuous = false; // el reconocedor detecta el silencio y cierra la frase solo
     rec.onresult = (e) => {
       recErrors = 0;
+      lastResultAt = performance.now();
       let finalT = '', interim = '';
       for (let i = 0; i < e.results.length; i++) {
         const r = e.results[i];
@@ -763,7 +793,7 @@
     rec.onend = () => {
       rec = null;
       if (app.state !== 'listening') return;
-      if (heard) ask(heard);
+      if (heard) ask(heard, { speechEnd: lastResultAt, final: performance.now() });
       else {
         // Nadie habló: seguimos escuchando (con espera creciente si hubo errores)
         setState('idle');
@@ -802,6 +832,7 @@
     r.interimResults = true;
     r.continuous = false;
     r.onresult = (e) => {
+      lastResultAt = performance.now();
       const w = words(Array.from(e.results).map((x) => x[0].transcript).join(' '));
       if (!cut) {
         const foreign = w.filter((x) => !spoken.has(x));
@@ -826,7 +857,7 @@
       dbg(`fin de escucha (estado: ${app.state}${cut ? ', interrumpido' : ''})`);
       if (cut) {
         if (app.state !== 'listening') return;
-        if (heard) ask(heard);
+        if (heard) ask(heard, { speechEnd: lastResultAt, final: performance.now() });
         else { setState('idle'); if (app.micOn) setTimeout(() => { if (app.state === 'idle' && app.micOn) startListening(); }, 250); }
       } else if (app.state === 'speaking') setTimeout(startBargeIn, 100); // sigue hablando: seguir atento
     };

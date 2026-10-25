@@ -156,26 +156,28 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - `formatBreakdown(report) -> string`. Devuelve una línea para el `title` de `#t-voice`, por ejemplo: `habla→final 640 ms · init 900 · texto 1800 · voz 2300 · Agent(agenda) 200–3100`.
   - `isReportReady(turn) -> boolean`. Es verdadero si hay `server` y además `speechStart != null` o `firstQueued == null` con el turno terminado.
 
-- [ ] **Step 1: Escribir las pruebas que fallan** en `test/voice-timing.test.js` (con `require('../public/timing.js')`):
+- [x] **Step 1: Escribir las pruebas que fallan** en `test/voice-timing.test.js` (con `require('../public/timing.js')`):
   - `buildVoiceReport calcula las diferencias`: con `{ speechEnd:100, final:700, post:710, firstQueued:2500, speechStart:2600 }`, el resultado es `endToFinalMs:600`, `finalToPostMs:10`, `postToSpeechStartMs:1890` y `speechEndToSpeechStartMs:2500`.
   - `texto escrito: sin marcas de voz de entrada`: con `speechEnd` y `final` en `null`, `endToFinalMs` es `null`, y `postToSpeechStartMs` se calcula igual.
   - `reporte sin voz sale con speechStart null`: `isReportReady({ server:{}, marks:{ firstQueued:null, speechStart:null }, ended:true }) === true`.
   - `formatBreakdown muestra herramientas con su subagente`.
 
-- [ ] **Step 2: Correr y ver que fallan.** `node --test test/voice-timing.test.js`. Esperado: FAIL con «Cannot find module».
+- [x] **Step 2: Correr y ver que fallan.** `node --test test/voice-timing.test.js`. Esperado: FAIL con «Cannot find module».
 
-- [ ] **Step 3: Implementar `public/timing.js` y los ganchos en `app.js`.** Cada gancho tiene una o dos líneas:
+- [x] **Step 3: Implementar `public/timing.js` y los ganchos en `app.js`.** Cada gancho tiene una o dos líneas:
   - En `onresult` (escucha normal y barge-in), `lastResultAt = performance.now()`. En `onend`, se llama a `ask(heard, { speechEnd: lastResultAt, final: performance.now() })`.
   - `ask(text, voice = {})` crea `turn.marks` y marca `post` justo antes de `post('/api/message')`. El turno creado en `onEvent('turn')` sin `ask` arranca con todas las marcas en `null`.
   - La firma pasa a ser `speak(text, standalone = false, onStart)`, y `u.onstart` llama a `onStart?.()`. En `flushSentences`, el primer `speak` del turno marca `firstQueued` y le pasa un `onStart` que marca `speechStart` una sola vez.
   - En `onEvent('timing')` se guarda `cur.server = data`. En `done` se marca `cur.ended = true`. Cada vez que cambia algo se llama a `reportIfReady(turn)`: si `isReportReady` da verdadero y el turno todavía no se reportó, se escribe `#t-voice` (el texto es `speechEndToSpeechStartMs`, o `postToSpeechStartMs` si el mensaje fue escrito, y el `title` es `formatBreakdown`) y se hace `post('/api/timing', report)` sin esperar la respuesta.
   - Hay que guardar la referencia al turno antes de que `done` ponga `cur = null`. Un turno interrumpido antes de hablar no se reporta.
 
-- [ ] **Step 4: Correr las pruebas.** `npm test`. Esperado: PASS.
+- [x] **Step 4: Correr las pruebas.** `npm test`. Esperado: PASS.
 
 - [ ] **Step 5: Verificación manual (unos 3 turnos de cupo).** En Chrome, con `?debug`, decir «hola» por voz. `VOZ` tiene que mostrar los ms, el `title` el desglose, y en `logs/tiempos.jsonl` tiene que aparecer un registro `voz` con el mismo `turn` que el `servidor`. Con MUTE, igual tiene que aparecer el registro, con `speechStart: null`. Con ESC a mitad de un turno, no tiene que quedar nada colgado ni errores en la consola.
+  - **Pendiente para la persona:** el agente que implementó no tiene micrófono ni navegador; solo se verificó con `npm test` y `node --check`.
+  - Desvíos chicos: `speak` devuelve `true` si la frase quedó en cola, y `firstQueued` se marca solo en ese caso (con MUTE no se marca, y el reporte sale al terminar el turno). El gancho de `flushSentences` es un ayudante `speakTimed` de pocas líneas en `app.js`. Un `timing` con `interrupted: true` no se guarda en el turno, así que ese turno no se reporta.
 
-- [ ] **Step 6: Commit.** `git add public/timing.js public/index.html public/app.js test/voice-timing.test.js && git commit -m "Tiempos de voz en la telemetría y en el registro local"`
+- [x] **Step 6: Commit.** `git add public/timing.js public/index.html public/app.js test/voice-timing.test.js && git commit -m "Tiempos de voz en la telemetría y en el registro local"`
 
 ## Fase B: guion de comparación
 

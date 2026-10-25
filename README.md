@@ -92,6 +92,21 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
 | `JARVIS_AGENT_<NOMBRE>_MODEL` | `haiku` (agenda), `sonnet` (correo, investigador) | Modelo de cada subagente: `AGENDA`, `CORREO` o `INVESTIGADOR` (ver [Subagentes](#subagentes-y-tareas-en-segundo-plano)) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
+| `JARVIS_TIMING_LOG` | `logs/tiempos.jsonl` | Registro local de tiempos por turno (ver [Tiempos de respuesta](#tiempos-de-respuesta)). `0` lo apaga |
+
+## Tiempos de respuesta
+JARVIS mide cada turno tuyo por etapas, para saber dónde se va el tiempo entre que terminás de hablar y que empieza a contestar. Los tiempos van al registro local `logs/tiempos.jsonl` (una línea JSON por registro; `logs/` no se sube al repo) y al evento `timing` del canal de eventos, que sale justo antes del `done` del turno. Los turnos que arranca una tarea en segundo plano no se miden.
+
+Hay tres tipos de registro (campo `tipo`):
+- **`sesion`**, uno por sesión: el `model`, cuántas herramientas cargó el SDK (`tools`, y de esas `mcpTools` de servidores MCP), la lista de servidores `mcp` con su `status` y `source`, cuántas `skills` y los `agents`. La misma línea se ve en la consola: `[SESIÓN] modelo … · N herramientas (M de MCP) · servidores: …`.
+- **`servidor`**, uno por turno tuyo. Todos los ms se cuentan desde que llegó tu mensaje (`POST /api/message`); si un turno responde dos mensajes, desde el primero:
+  - `initMs`: el SDK arrancó el turno (`init`).
+  - `firstTextMs`: llegó el primer texto de JARVIS (no cuenta el de un subagente).
+  - `doneMs`: terminó el turno.
+  - `tools`: cada herramienta del turno con `name`, `agent` (el subagente, si es `Agent`), `startMs` y `endMs`.
+  - `interrupted`: el turno no terminó bien (ESC, hablarle encima o un error). Estos no se usan para comparar.
+  - `turn` (número de turno de la sesión), `model` y `flags` (las variantes experimentales activas).
+- **`voz`**, uno por turno, lo manda la interfaz (`POST /api/timing`). Los valores son de `performance.now()` en la página: `speechEnd` (último resultado del reconocedor), `final` (frase cerrada), `post` (mensaje enviado), `firstQueued` (primera frase entregada a la voz) y `speechStart` (empezó a sonar), más las diferencias `endToFinalMs`, `finalToPostMs`, `postToSpeechStartMs` y `speechEndToSpeechStartMs`. Con la voz silenciada, `speechStart` queda en `null`.
 
 ## Subagentes y tareas en segundo plano
 JARVIS puede delegar trabajo en subagentes (definidos en `src/agents/`). Los tres son de solo lectura o de preparación: **no envían ni borran nada**. Lo que envía o borra lo hace JARVIS mismo, y pide tu confirmación.
@@ -112,7 +127,7 @@ Para cambiar el modelo de uno, poné la variable en tu `.env` (por ejemplo `JARV
 
 ## Seguridad y privacidad
 - El servidor solo escucha en `127.0.0.1` y exige un token que se genera en cada arranque y solo conoce la página de JARVIS: otra web abierta en tu navegador no puede mandarle órdenes ni confirmar acciones. Si reiniciás el servidor, recargá la página (F5). La página se reconecta sola si el canal de eventos se corta, salvo que el token ya no valga (ahí pide F5).
-- El canal de eventos (`GET /api/events`) y todas las acciones POST (`/api/message`, `/api/interrupt`, `/api/confirm`, `/api/new`, `/api/tasks/stop`) exigen el mismo token y el mismo host local; solo un cliente está conectado al canal a la vez.
+- El canal de eventos (`GET /api/events`) y todas las acciones POST (`/api/message`, `/api/interrupt`, `/api/confirm`, `/api/new`, `/api/tasks/stop`, `/api/timing`) exigen el mismo token y el mismo host local; solo un cliente está conectado al canal a la vez.
 - Cada mensaje consume de tu cupo de Claude.
 - El reconocimiento de voz del navegador procesa el audio en servidores de Google (Chrome) o Microsoft (Edge).
 - La personalidad se define en `src/prompt.js`.

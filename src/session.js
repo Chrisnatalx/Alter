@@ -5,6 +5,7 @@ const { buildAgentOptions } = require('./agent-options');
 const { createPermissionGate, describeTool } = require('./permissions');
 const { createJarvisTools } = require('./tools');
 const { nowLine } = require('./prompt');
+const { startTurnTiming, trackMessage, summarizeTiming } = require('./timing');
 const crypto = require('crypto');
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -90,7 +91,7 @@ function mapMessage(msg, state) {
 }
 
 class Session {
-  constructor({ config, emit, sdk, queryFn = sdk.query }) {
+  constructor({ config, emit, sdk, queryFn = sdk.query, timingLog, now = Date.now }) {
     this.config = config;
     this.emit = emit;
     this.queryFn = queryFn;
@@ -101,6 +102,13 @@ class Session {
     this.q = null;
     this._closed = false;
     this.pushed = []; // uuid de mensajes enviados desde el último turno de la persona: pueden seguir en cola
+    // Tiempos por turno: llegada de cada mensaje aún sin turno, el turno medido y el registro local
+    this.timingLog = timingLog || { write() {} };
+    this.now = now;
+    this.receivedAts = [];
+    this.timing = null;
+    this.turnNo = 0;
+    this.sessionLogged = false;
   }
 
   get sessionId() { return this.state.sessionId; }
@@ -123,9 +131,12 @@ class Session {
   async _consume() {
     try {
       for await (const msg of this.q) {
+        const at = this.now();
         // Con la sesión cerrada (p. ej. tras NUEVA) lo que aún llega es viejo: se procesa pero no se emite
         const events = mapMessage(msg, this.state);
-        if (msg.type === 'system' && msg.subtype === 'init' && this.state.turnOrigin === 'user') this.pushed = [];
+        if (msg.type === 'system' && msg.subtype === 'init') this._startTiming(msg, at);
+        trackMessage(this.timing, msg, at);
+        if (msg.type === 'result' && this.timing) this._finishTiming(); // antes del done o error del turno
         if (!this._closed) for (const [event, data] of events) this.emit(event, data);
       }
       if (!this._closed) this.emit('error', { message: 'La sesión terminó inesperadamente.' });
@@ -137,10 +148,42 @@ class Session {
     this.gate.denyAll();
   }
 
-  send(text) {
+  // Un init arranca la medición si el turno es de la persona; los turnos de tarea no se miden
+  _startTiming(init, at) {
+    if (!this.sessionLogged) { this.sessionLogged = true; this._logSession(init); }
+    if (this.state.turnOrigin !== 'user') { this.timing = null; return; }
+    this.pushed = [];
+    // Si un turno responde varios mensajes, se cuenta desde el primero que llegó
+    this.timing = startTurnTiming(this.receivedAts.length ? Math.min(...this.receivedAts) : at);
+    this.receivedAts = [];
+    this.turnNo++;
+  }
+
+  _finishTiming() {
+    const payload = { turn: this.turnNo, model: this.state.model, ...summarizeTiming(this.timing) };
+    this.timing = null;
+    if (!this._closed) this.emit('timing', payload);
+    const flags = { mcpFilter: !!this.config.mcpFilter, promptDirect: !!this.config.promptDirect };
+    this.timingLog.write({ tipo: 'servidor', fecha: new Date().toISOString(), ...payload, flags });
+  }
+
+  // Una vez por sesión: qué cargó el SDK (herramientas, servidores MCP, skills y agentes)
+  _logSession(init) {
+    const tools = init.tools || [];
+    const mcpTools = tools.filter((t) => t.startsWith('mcp__')).length;
+    const mcp = init.mcp_servers || [];
+    this.timingLog.write({
+      tipo: 'sesion', fecha: new Date().toISOString(), model: init.model,
+      tools: tools.length, mcpTools, mcp, skills: (init.skills || []).length, agents: init.agents ?? [],
+    });
+    const servers = mcp.map((m) => `${m.name} (${m.status})`).join(', ') || 'ninguno';
+    console.log(`  [SESIÓN] modelo ${init.model} · ${tools.length} herramientas (${mcpTools} de MCP) · servidores: ${servers}`);
+  }
+
+  send(text, { receivedAt } = {}) {
     this.state.userSince = true;
     const uuid = this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${text}`);
-    if (uuid) this.pushed.push(uuid);
+    if (uuid) { this.pushed.push(uuid); this.receivedAts.push(receivedAt ?? this.now()); }
     return uuid;
   }
 
@@ -150,7 +193,7 @@ class Session {
     const st = this.state;
     const local = this.queue.clear(); // lo que no salió hacia el SDK no debe salir nunca
     this.pushed = this.pushed.filter((id) => !local.includes(id));
-    if (!this.q) { st.userSince = false; return; }
+    if (!this.q) { st.userSince = false; this.receivedAts = []; return; }
     // Un uuid ya consumido o inexistente rechaza la cancelación: no importa
     const cancel = (ids) => Promise.all(ids.map((id) => Promise.resolve().then(() => this.q.cancelAsyncMessage(id)).catch(() => {})));
     if (st.turnActive && st.turnOrigin !== 'task') {
@@ -168,6 +211,7 @@ class Session {
       await cancel(this.pushed.splice(0));
     }
     st.userSince = false; // lo que esperaba su turno se descartó: el próximo turno no es de la persona
+    this.receivedAts = []; // ni se mide desde esos mensajes
   }
 
   async stopTask(taskId) { await this.q?.stopTask(taskId); }

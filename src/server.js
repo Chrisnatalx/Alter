@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const config = require('./config');
 const { createEventHub } = require('./events');
 const { Session } = require('./session');
+const { createTimingLog, sanitizeVoiceRecord } = require('./timing');
 
 const PORT = config.port;
 
@@ -113,11 +114,12 @@ function handleEvents(req, res, deps) {
 
 // POST /api/message { text, sessionId? } → 202. La respuesta llega por el canal de eventos.
 async function handleMessage(req, res, deps) {
+  const receivedAt = Date.now(); // los tiempos del turno se cuentan desde acá (incluye crear la sesión)
   const payload = await readJson(req);
   const text = String(payload.text || '').trim();
   if (!text) { res.writeHead(400).end(); return; }
   const session = await ensureSession(stateOf(deps), deps, payload.sessionId);
-  session.send(text);
+  session.send(text, { receivedAt });
   res.writeHead(202).end();
 }
 
@@ -159,6 +161,13 @@ const POST_ROUTES = {
     await liveSession(stateOf(deps))?.stopTask(String(payload.taskId));
     noContent(res);
   },
+  // Tiempos de voz que mide la interfaz: se guardan saneados en el registro local
+  '/api/timing': async (req, res, deps) => {
+    const record = sanitizeVoiceRecord(await readJson(req));
+    if (!record) { res.writeHead(400).end(); return; }
+    deps.timingLog?.write({ tipo: 'voz', fecha: new Date().toISOString(), ...record });
+    noContent(res);
+  },
 };
 
 function handleRequest(req, res, deps) {
@@ -189,10 +198,11 @@ const deps = {
   hub,
   token: TOKEN,
   allowedHosts: ALLOWED_HOSTS,
+  timingLog: createTimingLog({ file: config.timingLog }),
   // Carga el SDK (ESM) una vez, crea la sesión con sus herramientas y la arranca.
   async sessionFactory(resumeId) {
     const sdk = await loadSdk();
-    const session = new Session({ config, emit: hub.emit, sdk });
+    const session = new Session({ config, emit: hub.emit, sdk, timingLog: deps.timingLog });
     session.start({ resumeId });
     return session;
   },

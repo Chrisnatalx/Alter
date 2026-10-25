@@ -107,7 +107,7 @@ test('Session emite los eventos de la query', async () => {
   s.start({});
   s.send('hola');
   await tick();
-  assert.deepEqual(events, ['turn', 'init', 'delta', 'done']);
+  assert.deepEqual(events, ['turn', 'init', 'delta', 'timing', 'done']); // timing: turno de la persona
   assert.equal(s.sessionId, 'sid-1');
   s.close();
 });
@@ -350,5 +350,61 @@ test('los uuid recordados se olvidan cuando arranca un turno de la persona', asy
   await tick();
   assert.equal(s.state.turnOrigin, 'user');
   assert.deepEqual(s.pushed, []);
+  s.close();
+});
+
+// ---- Tiempos por turno ----
+const spyLog = () => { const records = []; return { records, write: (r) => records.push(r) }; };
+const initFull = { ...init, tools: ['WebSearch', 'Agent', 'mcp__jarvis__x', 'mcp__claude_ai_Gmail__y'], mcp_servers: [{ name: 'jarvis', status: 'connected', source: 'sdk' }], skills: ['a'] };
+
+test('timing: el turno de la persona emite timing antes de done y lo registra', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { queryFn } = fakeQuery([initFull, delta('Hola'), success, initFull, success]);
+  const events = [];
+  const log = spyLog();
+  let clock = 1000;
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn, timingLog: log, now: () => (clock += 100) });
+  s.send('hola', { receivedAt: 1000 });
+  s.start({}); // el segundo init también es de la persona: sin send, se mide desde el init
+  await tick();
+  assert.deepEqual(events.map(([e]) => e).slice(0, 5), ['turn', 'init', 'delta', 'timing', 'done']);
+  const timing = events.find(([e]) => e === 'timing')[1];
+  assert.equal(timing.turn, 1);
+  assert.equal(timing.model, 'haiku');
+  assert.equal(typeof timing.initMs, 'number');
+  assert.equal(log.records.filter((r) => r.tipo === 'servidor').length, 2);
+  const sesiones = log.records.filter((r) => r.tipo === 'sesion');
+  assert.equal(sesiones.length, 1); // una sola vez aunque haya dos turnos
+  assert.equal(sesiones[0].tools, 4);
+  assert.equal(sesiones[0].mcpTools, 2);
+  assert.equal(sesiones[0].skills, 1);
+  assert.deepEqual(sesiones[0].mcp, initFull.mcp_servers);
+  s.close();
+});
+
+test('timing: turno de tarea no se mide', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { queryFn } = fakeQuery([taskInit, init, success]);
+  const events = [];
+  const log = spyLog();
+  const s = new Session({ config, emit: (e) => events.push(e), sdk: fakeSdk, queryFn, timingLog: log });
+  s.start({});
+  await tick();
+  assert.ok(events.includes('done'));
+  assert.ok(!events.includes('timing'));
+  assert.equal(log.records.filter((r) => r.tipo === 'servidor').length, 0);
+  s.close();
+});
+
+test('timing: dos mensajes en un turno cuentan desde el primero', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { queryFn } = fakeQuery([init, success]);
+  const events = [];
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn, timingLog: spyLog(), now: () => 1500 });
+  s.send('a', { receivedAt: 1000 });
+  s.send('b', { receivedAt: 1300 });
+  s.start({});
+  await tick();
+  assert.equal(events.find(([e]) => e === 'timing')[1].initMs, 500);
   s.close();
 });

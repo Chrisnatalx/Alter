@@ -112,7 +112,7 @@ Inferido (lo comprueba la tarea 6, paso 1):
     - Por `POST /api/timing`, `{ tipo: 'voz', fecha, ...sanitizeVoiceRecord(payload) }`.
   - La ruta `POST /api/timing` responde 204, o 400 si el cuerpo no se puede sanear. Exige token, como el resto de la API.
 
-- [ ] **Step 1: Escribir las pruebas que fallan.**
+- [x] **Step 1: Escribir las pruebas que fallan.**
   - En `test/session.test.js`, con `fakeQuery`, un `timingLog` espía y un `now` controlado:
     - `timing: el turno de la persona emite timing antes de done y lo registra`: con `send('hola', { receivedAt: 1000 })` y el guion `[init, delta('Hola'), success]`, los eventos son `['turn','init','delta','timing','done']`. Además, `timing.turn === 1`, `initMs` es un número y el espía recibe un registro `tipo: 'servidor'` y otro `tipo: 'sesion'`, este último una sola vez aunque haya dos turnos.
     - `timing: turno de tarea no se mide`: con `task_notification`, `init` y `success` sin `send`, no hay evento `timing` ni registro `servidor`.
@@ -122,9 +122,9 @@ Inferido (lo comprueba la tarea 6, paso 1):
     - `POST /api/timing guarda un registro saneado y da 204`: con `deps.timingLog` espía y el cuerpo `{ turn: 1, speechStart: 5, raro: 'x' }`, el registro tiene `tipo: 'voz'` y no tiene `raro`.
     - `POST /api/timing sin token da 403`.
 
-- [ ] **Step 2: Correr y ver que fallan.** `node --test test/session.test.js test/server.test.js`. Esperado: FAIL en las pruebas nuevas, y las viejas siguen en PASS.
+- [x] **Step 2: Correr y ver que fallan.** `node --test test/session.test.js test/server.test.js`. Esperado: FAIL en las pruebas nuevas, y las viejas siguen en PASS.
 
-- [ ] **Step 3: Implementar.**
+- [x] **Step 3: Implementar.**
   - En `Session`, `send` guarda `receivedAt ?? now()` en `this.receivedAts`. En `_consume`, después de `mapMessage` de un `init` con `turnOrigin === 'user'`, se hace `this.timing = startTurnTiming(Math.min(...this.receivedAts))` y se vacía `receivedAts`, en el mismo lugar donde hoy se limpia `this.pushed`. Con origen `task`, `this.timing = null`.
   - Cada mensaje pasa por `trackMessage` con `now()`. Con un `result`, se emite y se registra `timing` antes de los eventos mapeados.
   - El registro `sesion` se escribe con el primer `init` y también se muestra en la consola, en una línea: `  [SESIÓN] modelo … · N herramientas (M de MCP) · servidores: …`.
@@ -132,11 +132,13 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - Las `flags` del registro salen de `config.mcpFilter` y `config.promptDirect`. Hasta las tareas 6 y 7 valen `undefined`, que es lo mismo que apagado.
   - README: sección «Tiempos de respuesta», con dónde está el registro y qué significa cada campo. También hay que sumar `JARVIS_TIMING_LOG` a la tabla de configuración y a `.env.example`, y `logs/` a `.gitignore`.
 
-- [ ] **Step 4: Correr todo.** `npm test`. Esperado: PASS completo.
+- [x] **Step 4: Correr todo.** `npm test`. Esperado: PASS completo.
 
-- [ ] **Step 5: Verificación real (1 turno de cupo).** Correr `jarvis`, escribir «hola» y mirar `logs/tiempos.jsonl`. Tiene que haber un registro `sesion` con la lista de `mcp` y su `source`, y un registro `servidor`. **Hay que anotar el `model` que informa `init` y los nombres exactos de los servidores, porque los usan las tareas 5 y 6.**
+- [x] **Step 5: Verificación real (1 turno de cupo).** Correr `jarvis`, escribir «hola» y mirar `logs/tiempos.jsonl`. Tiene que haber un registro `sesion` con la lista de `mcp` y su `source`, y un registro `servidor`. **Hay que anotar el `model` que informa `init` y los nombres exactos de los servidores, porque los usan las tareas 5 y 6.**
+  - **Anotado (2026-10-25, puerto 7781, sin `JARVIS_MODEL`):** `init.model` = `claude-opus-5-5`. Sesión con 231 herramientas (228 de MCP), 64 skills y 32 servidores (`source`: `plugin`, `user`, `claudeai`, `sdk`). Los nombres conservados coinciden con el patrón: `claude.ai Gmail`, `claude.ai Google Calendar`, `claude.ai Google Drive` y `claude.ai GitHub` (los cuatro `connected`), `plugin:discord:discord` (**`failed`**) y `jarvis` (`connected`). `init.agents` trae, además de los tres propios, `claude`, `Explore`, `general-purpose`, `Plan`, `statusline-setup` y `superpowers:code-reviewer`.
+  - Nota: el evento `timing` nuevo obligó a actualizar la prueba vieja `Session emite los eventos de la query`, que ahora espera `timing` entre `delta` y `done`.
 
-- [ ] **Step 6: Commit.** `git add src/session.js src/server.js src/config.js .gitignore README.md .env.example test/session.test.js test/server.test.js && git commit -m "Tiempos por turno en el canal de eventos y en logs/tiempos.jsonl"`
+- [x] **Step 6: Commit.** `git add src/session.js src/server.js src/config.js .gitignore README.md .env.example test/session.test.js test/server.test.js && git commit -m "Tiempos por turno en el canal de eventos y en logs/tiempos.jsonl"`
 
 ### Task 3: Tiempos de voz en la interfaz
 

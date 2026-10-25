@@ -208,3 +208,32 @@ test('GET /api/events reenvía las confirmaciones pendientes', async () => {
   await call(deps, 'GET', '/api/events');
   assert.deepEqual(deps.events.at(-1), ['confirm', pending]);
 });
+
+test('POST /api/message pasa receivedAt a send', async () => {
+  const opts = [];
+  const s = fakeSession({ send: (t, o) => opts.push(o) });
+  await call(mkDeps(s), 'POST', '/api/message', { text: 'hola' });
+  assert.equal(typeof opts[0]?.receivedAt, 'number');
+});
+
+test('POST /api/timing guarda un registro saneado y da 204', async () => {
+  const records = [];
+  const deps = mkDeps(fakeSession());
+  deps.timingLog = { write: (r) => records.push(r) };
+  const res = await call(deps, 'POST', '/api/timing', { turn: 1, speechStart: 5, raro: 'x' });
+  assert.equal(res.status, 204);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].tipo, 'voz');
+  assert.equal(records[0].turn, 1);
+  assert.equal(records[0].speechStart, 5);
+  assert.equal('raro' in records[0], false);
+});
+
+test('POST /api/timing sin token da 403', async () => {
+  const records = [];
+  const deps = mkDeps(fakeSession());
+  deps.timingLog = { write: (r) => records.push(r) };
+  const res = await call(deps, 'POST', '/api/timing', { turn: 1 }, { 'x-jarvis-token': '' });
+  assert.equal(res.status, 403);
+  assert.equal(records.length, 0);
+});

@@ -41,6 +41,8 @@ module.exports = Object.freeze({
   timezone: resolveTimezone(process.env.JARVIS_TIMEZONE),
   claudeBin: resolveClaudeBin(),
   confirmTimeoutMs: 2 * 60 * 1000, // sin respuesta en 2 minutos → se deniega
+  // Registro local de tiempos por turno (JSONL); '0' lo apaga
+  timingLog: process.env.JARVIS_TIMING_LOG === '0' ? '' : (process.env.JARVIS_TIMING_LOG || path.join(ROOT, 'logs', 'tiempos.jsonl')),
   coreDir,
   publicDir: path.join(ROOT, 'public'),
 });

@@ -65,6 +65,44 @@ test('bloques de texto seguidos del orquestador van separados («Ya me fijo.» y
   assert.deepEqual(mapMessage(textStart('x'), state), []);
 });
 
+test('integración: preámbulo, herramienta con tool_result, separador y timing en el mismo turno', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const toolStart = { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', content_block: { type: 'tool_use', id: 'tu1', name: 'mcp__claude_ai_Google_Calendar__list_events' } } };
+  const assistantTool = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu1', name: 'mcp__claude_ai_Google_Calendar__list_events', input: {} }] } };
+  const toolResult = { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', is_error: false, content: 'x' }] } };
+  const script = [init, textStart(), delta('Ya me fijo.'), toolStart, assistantTool, toolResult, textStart(), delta('Hoy no tenés nada.'), success];
+  const { queryFn } = fakeQuery(script);
+  const events = [];
+  let clock = 1000;
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn, timingLog: spyLog(), now: () => (clock += 100) });
+  s.send('¿qué tengo hoy?', { view: { face: 'weather' }, receivedAt: 1000 });
+  s.start({});
+  await tick();
+  const names = events.map(([e]) => e);
+  assert.deepEqual(names, ['turn', 'init', 'delta', 'tool', 'tool_result', 'delta', 'delta', 'timing', 'done']);
+  assert.equal(events.filter(([e]) => e === 'delta').map(([, d]) => d.text).join(''), 'Ya me fijo.\nHoy no tenés nada.');
+  assert.deepEqual(events.find(([e]) => e === 'tool_result')[1].ok, true);
+  const timing = events.find(([e]) => e === 'timing')[1];
+  assert.equal(timing.tools.length, 1);
+  assert.equal(timing.tools[0].name, 'mcp__claude_ai_Google_Calendar__list_events');
+  assert.ok(timing.firstTextMs < timing.tools[0].startMs); // el preámbulo llegó antes que la herramienta
+  s.close();
+});
+
+test('send con vista y receivedAt: la línea de la vista va al SDK y el tiempo se cuenta desde la llegada', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { queryFn, calls } = fakeQuery([init, success]);
+  const events = [];
+  const s = new Session({ config, emit: (e, d) => events.push([e, d]), sdk: fakeSdk, queryFn, timingLog: spyLog(), now: () => 1700 });
+  s.send('hola', { view: { face: 'weather' }, receivedAt: 1000 });
+  s.start({});
+  const first = (await calls.args.prompt[Symbol.asyncIterator]().next()).value;
+  assert.match(first.message.content, /\n\[Vista en pantalla: Clima de Buenos Aires\]\nhola$/);
+  await tick();
+  assert.equal(events.find(([e]) => e === 'timing')[1].initMs, 700);
+  s.close();
+});
+
 test('un delta con parent_tool_use_id (subagente) no emite nada', () => {
   assert.deepEqual(mapMessage(delta('x', 'abc'), mkState()), []);
 });
@@ -72,6 +110,19 @@ test('un delta con parent_tool_use_id (subagente) no emite nada', () => {
 test('mapMessage: tool_use del orquestador emite tool', () => {
   const msg = { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'WebSearch' } } };
   assert.deepEqual(mapMessage(msg, mkState()), [['tool', { app: 'búsqueda web', action: '' }]]);
+});
+
+test('mapMessage: el resultado de una herramienta del orquestador emite tool_result (ok o con error)', () => {
+  const state = mkState();
+  const start = (id, name) => ({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', content_block: { type: 'tool_use', id, name } } });
+  const result = (id, isError, parent = null) => ({ type: 'user', parent_tool_use_id: parent, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: 'x' }] } });
+  mapMessage(start('tu1', 'mcp__claude_ai_Gmail__send_message'), state);
+  mapMessage(start('tu2', 'mcp__claude_ai_Gmail__create_draft'), state);
+  assert.deepEqual(mapMessage(result('tu1', true), state), [['tool_result', { app: 'Gmail', action: 'send message', ok: false }]]);
+  assert.deepEqual(mapMessage(result('tu2', false), state), [['tool_result', { app: 'Gmail', action: 'create draft', ok: true }]]);
+  assert.deepEqual(mapMessage(result('tu1', false), state), []); // ya contestado: no se repite
+  assert.deepEqual(mapMessage(result('zzz', false), state), []); // de un subagente o desconocido: nada
+  assert.deepEqual(mapMessage({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: 'hola' } }, state), []);
 });
 
 test('mapMessage: task_started y background_tasks_changed', () => {
@@ -136,6 +187,16 @@ test('send antes de que arranque la query no se pierde y lleva la fecha', async 
   s.start({});
   const first = (await calls.args.prompt[Symbol.asyncIterator]().next()).value;
   assert.match(first.message.content, /^\[Fecha y hora actual: .+\]\nhola$/);
+  s.close();
+});
+
+test('send con una vista abierta agrega la línea de la vista después de la fecha', async () => {
+  const { queryFn, calls } = fakeQuery();
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.send('respondé el segundo', { view: { face: 'mail', threads: [{ id: 't1', from: 'Ana', subject: 'Hola', unread: true }, { id: 't2', from: 'Beto', subject: 'Factura', unread: false }] } });
+  s.start({});
+  const first = (await calls.args.prompt[Symbol.asyncIterator]().next()).value;
+  assert.match(first.message.content, /^\[Fecha y hora actual: .+\]\n\[Vista en pantalla: Mail;.+\]\nrespondé el segundo$/);
   s.close();
 });
 

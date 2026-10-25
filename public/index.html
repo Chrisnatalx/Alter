@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Rajdhani:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body data-state="boot">
+<body data-state="boot" data-face="core">
   <canvas id="core"></canvas>
   <div class="scanlines"></div>
   <div class="vignette"></div>
@@ -37,6 +37,18 @@
       <text x="-472" y="5" text-anchor="end">270</text>
     </g>
   </svg>
+
+  <!-- Carrusel de vistas: Núcleo → Calendar → Mail en un anillo 3D; el Clima queda arriba, fuera del anillo.
+       Solo se mira: dentro de una vista se actúa por voz. -->
+  <section id="carousel" class="carousel" aria-label="Vistas">
+    <div id="ring" class="carousel-ring">
+      <div class="face face-core" data-face="core"><header class="face-head"><h4>NÚCLEO</h4></header></div>
+      <div class="face face-calendar" data-face="calendar" id="face-calendar"></div>
+      <div class="face face-mail" data-face="mail" id="face-mail"></div>
+    </div>
+  </section>
+  <section id="weather-face" class="face face-weather" aria-label="Clima"></section>
+  <div id="face-dots" class="face-dots" aria-hidden="true"><i></i><i></i><i></i></div>
 
   <!-- Zona clickeable del núcleo: interrumpe la respuesta o prende/apaga el micrófono -->
   <button id="core-btn" aria-label="Interrumpir o prender/apagar el micrófono"></button>
@@ -96,6 +108,9 @@
     <div class="confirm-hint">Cerrá esta pestaña, o recargá (F5) para traer a JARVIS de vuelta acá.</div>
   </section>
 
+  <!-- Estado de la cámara y los gestos (el video nunca se muestra) -->
+  <div id="hand-state" class="hand-state" aria-live="polite">CÁMARA APAGADA</div>
+
   <section class="subtitles">
     <div id="sub-user" class="sub user"></div>
     <div id="sub-ai" class="sub ai"></div>
@@ -110,6 +125,7 @@
     <div class="controls">
       <button id="mode-btn" class="btn" title="Prender/apagar el micrófono (ESPACIO)">MICRÓFONO · ON</button>
       <button id="mute-btn" class="btn" title="Silenciar mi voz">VOZ · ON</button>
+      <button id="cam-btn" class="btn" title="Prender/apagar la cámara y los gestos (C)">CÁMARA · ON</button>
       <button id="reset-btn" class="btn" title="Empezar una conversación nueva">NUEVA</button>
     </div>
   </footer>
@@ -123,6 +139,10 @@
   </div>
 
   <script src="timing.js"></script>
+  <script src="gestures.js"></script>
+  <script src="nav.js"></script>
+  <script src="hands.js"></script>
+  <script src="faces.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

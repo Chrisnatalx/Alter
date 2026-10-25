@@ -53,6 +53,17 @@ module.exports = Object.freeze({
   promptPreamble: !isOff(process.env.JARVIS_PROMPT_PREAMBLE),
   // Registro local de tiempos por turno (JSONL); '0' lo apaga
   timingLog: process.env.JARVIS_TIMING_LOG === '0' ? '' : (process.env.JARVIS_TIMING_LOG || path.join(ROOT, 'logs', 'tiempos.jsonl')),
+  // Refresco en segundo plano de Calendar y Gmail para las vistas (src/feeds/): query aparte, solo lectura
+  feedModel: process.env.JARVIS_FEED_MODEL || 'haiku',
+  feedTimeoutMs: 120000,
+  inboxSize: 8, // hilos de la bandeja que entran en la cara de Mail
+  feedIntervalMs: 10 * 60 * 1000, // cada 10 minutos, solo con la página abierta
+  feedStaleMs: 5 * 60 * 1000,     // al volver a la pestaña, se refresca si los datos tienen más de 5 minutos
   coreDir,
   publicDir: path.join(ROOT, 'public'),
+  // Lo que la página carga de /vendor/: MediaPipe desde node_modules y el modelo de manos (npm run modelo)
+  vendor: Object.freeze({
+    '/vendor/mediapipe/': path.join(ROOT, 'node_modules', '@mediapipe', 'tasks-vision'),
+    '/vendor/models/': path.join(ROOT, 'vendor'),
+  }),
 });

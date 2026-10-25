@@ -13,6 +13,9 @@ const config = require('./config');
 const { createEventHub } = require('./events');
 const { Session } = require('./session');
 const { createTimingLog, sanitizeVoiceRecord } = require('./timing');
+const { createFeedCache, createFeedWatcher } = require('./feeds/cache');
+const { runGoogleRefresh } = require('./feeds/google');
+const { fetchWeather } = require('./feeds/weather');
 
 const PORT = config.port;
 
@@ -33,27 +36,75 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.task': 'application/octet-stream',
 };
 
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// La ruta pedida, ya decodificada, o null si viene mal codificada (p. ej. "/%": sin token, cualquiera puede mandarlo)
+function decodedPath(req) {
+  try { return decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { return null; }
+}
+
+// Archivo `rel` dentro de `root`, o null si se sale (con .., barras invertidas o lo que sea)
+function resolveInside(root, rel) {
+  const base = path.resolve(root);
+  const file = path.normalize(path.join(base, rel));
+  return file.startsWith(base + path.sep) ? file : null;
+}
+
+// La página solo puede hablar con este servidor: así el cliente de estadísticas que trae MediaPipe
+// (odml.pa.googleapis.com) queda bloqueado. Las fuentes de Google y el reconocimiento de voz no pasan por connect-src.
+const CSP = "connect-src 'self'";
+
 function serveStatic(req, res, token = TOKEN) {
-  let urlPath;
-  try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; } // p. ej. "/%": sin token, cualquiera puede mandarlo
+  const urlPath = decodedPath(req);
+  if (urlPath === null) { res.writeHead(400).end(); return; }
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-  const file = path.normalize(path.join(config.publicDir, rel));
-  if (!file.startsWith(config.publicDir)) { res.writeHead(403).end(); return; }
+  const file = resolveInside(config.publicDir, rel);
+  if (!file) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('not found'); return; }
     const type = MIME[path.extname(file)] || 'application/octet-stream';
+    const headers = { 'Content-Type': type, 'Cache-Control': 'no-store' };
     if (file.endsWith('index.html')) {
       data = Buffer.from(data.toString('utf8')
         .replace('__JARVIS_TOKEN__', () => token) // con función: `$&` y similares no se interpretan
         .replace('__JARVIS_USER__', () => escapeHtml(config.userName)));
+      headers['Content-Security-Policy'] = CSP;
     }
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    res.writeHead(200, headers);
     res.end(data);
   });
+}
+
+// /vendor/… → MediaPipe (de node_modules) y el modelo de manos (de vendor/), sin CDN.
+// Devuelve false si la ruta no es de /vendor/, para que siga serveStatic.
+function serveVendor(req, res, roots = config.vendor) {
+  const urlPath = decodedPath(req);
+  if (urlPath === null) return false;
+  const prefix = Object.keys(roots).find((p) => urlPath.startsWith(p));
+  if (!prefix) return false;
+  const rel = urlPath.slice(prefix.length);
+  const file = rel.includes('..') ? null : resolveInside(roots[prefix], rel);
+  if (!file) { res.writeHead(403).end(); return true; }
+  const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' };
+  // HEAD: la página pregunta si está el modelo antes de pedir la cámara; no hace falta leer 8 MB para eso
+  if (req.method === 'HEAD') {
+    fs.stat(file, (err, st) => {
+      if (err || !st.isFile()) { res.writeHead(404).end(); return; }
+      res.writeHead(200, { ...headers, 'Content-Length': st.size }).end();
+    });
+    return true;
+  }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404).end('not found'); return; }
+    res.writeHead(200, headers);
+    res.end(data);
+  });
+  return true;
 }
 
 // El cuerpo debe ser un objeto JSON: `null`, un número o una lista darían 500 al leer sus campos.
@@ -110,16 +161,37 @@ function handleEvents(req, res, deps) {
     // Confirmaciones que siguen esperando respuesta: la página recién conectada no las conoce
     for (const c of session.pendingConfirms?.() || []) deps.hub.emit('confirm', c);
   }
+  // Las vistas necesitan datos al día; recargar la página seguido no relanza la query cada vez
+  deps.feeds?.refreshAll({ ifOlderMs: 60000 });
 }
 
-// POST /api/message { text, sessionId? } → 202. La respuesta llega por el canal de eventos.
+// GET /api/feeds → lo último que se trajo de Calendar, Mail y Clima (cada uno con su hora y su error)
+function handleFeeds(req, res, deps) {
+  if (!deps.feeds) { res.writeHead(404).end(); return; }
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(deps.feeds.snapshot()));
+}
+
+// POST /api/feeds/refresh { kind?, ifOlderMs? } → 202 sin esperar: el resultado llega por el evento `feeds`
+const FEED_KINDS = new Set(['google', 'weather']);
+async function handleFeedsRefresh(req, res, deps) {
+  const payload = await readJson(req);
+  if (payload.kind !== undefined && !FEED_KINDS.has(payload.kind)) { res.writeHead(400).end(); return; }
+  if (!deps.feeds) { res.writeHead(404).end(); return; }
+  const ifOlderMs = typeof payload.ifOlderMs === 'number' ? payload.ifOlderMs : undefined;
+  if (payload.kind) deps.feeds.refresh(payload.kind, { ifOlderMs });
+  else deps.feeds.refreshAll({ ifOlderMs });
+  res.writeHead(202).end();
+}
+
+// POST /api/message { text, sessionId?, view? } → 202. La respuesta llega por el canal de eventos.
+// `view` es la cara del carrusel abierta: la sesión la agrega como contexto (prompt.js, viewLine).
 async function handleMessage(req, res, deps) {
   const receivedAt = Date.now(); // los tiempos del turno se cuentan desde acá (incluye crear la sesión)
   const payload = await readJson(req);
   const text = String(payload.text || '').trim();
   if (!text) { res.writeHead(400).end(); return; }
   const session = await ensureSession(stateOf(deps), deps, payload.sessionId);
-  session.send(text, { receivedAt });
+  session.send(text, { view: payload.view, receivedAt });
   res.writeHead(202).end();
 }
 
@@ -141,10 +213,15 @@ async function handleNew(req, res, deps) {
   noContent(res);
 }
 
-// Rutas POST de la API: (req, res, deps) → promesa. Todas exigen isTrusted antes de llegar acá.
+// Rutas de la API: (req, res, deps). Todas exigen isTrusted antes de llegar acá.
+const GET_ROUTES = {
+  '/api/events': handleEvents,
+  '/api/feeds': handleFeeds,
+};
 const POST_ROUTES = {
   '/api/message': handleMessage,
   '/api/new': handleNew,
+  '/api/feeds/refresh': handleFeedsRefresh,
   '/api/interrupt': async (req, res, deps) => {
     await readJson(req);
     await liveSession(stateOf(deps))?.interrupt();
@@ -175,10 +252,10 @@ function handleRequest(req, res, deps) {
   const trust = { token: deps.token, allowedHosts: deps.allowedHosts };
   if (pathname.startsWith('/api/')) {
     if (!isTrusted(req, trust)) { res.writeHead(403).end(); return; }
-    if (req.method === 'GET' && pathname === '/api/events') return handleEvents(req, res, deps);
-    const route = req.method === 'POST' && POST_ROUTES[pathname];
+    const routes = req.method === 'GET' ? GET_ROUTES : req.method === 'POST' ? POST_ROUTES : {};
+    const route = Object.hasOwn(routes, pathname) && routes[pathname];
     if (!route) { res.writeHead(404).end(); return; }
-    route(req, res, deps).catch((err) => {
+    Promise.resolve().then(() => route(req, res, deps)).catch((err) => {
       // JSON roto → 400; cualquier otra falla (p. ej. no se pudo arrancar la sesión) → 500
       if (res.headersSent) { res.end(); return; }
       res.writeHead(err instanceof SyntaxError ? 400 : 500).end();
@@ -186,23 +263,39 @@ function handleRequest(req, res, deps) {
     });
     return;
   }
-  if (req.method === 'GET') {
+  if (req.method === 'GET' || req.method === 'HEAD') {
     if (!deps.allowedHosts.has(req.headers.host)) { res.writeHead(403).end(); return; }
+    if (serveVendor(req, res)) return;
+    if (req.method === 'HEAD') { res.writeHead(405).end(); return; } // HEAD solo para /vendor/
     return serveStatic(req, res, deps.token);
   }
   res.writeHead(405).end();
 }
 
 const hub = createEventHub();
+// Datos de las vistas: Clima de Open-Meteo y Calendar + Gmail por una query de solo lectura aparte
+const feeds = createFeedCache({
+  loaders: {
+    google: () => loadSdk().then((sdk) => runGoogleRefresh({ queryFn: sdk.query, config })),
+    weather: () => fetchWeather(),
+  },
+  intervalMs: config.feedIntervalMs,
+  hasClient: hub.hasClient,
+  emit: hub.emit,
+});
+// Si JARVIS respondió, archivó o borró algo en Gmail o Calendar, al terminar el turno se refresca
+const watchFeeds = createFeedWatcher(() => feeds.refresh('google', { reason: 'write' }), { hasClient: hub.hasClient });
 const deps = {
   hub,
+  feeds,
   token: TOKEN,
   allowedHosts: ALLOWED_HOSTS,
   timingLog: createTimingLog({ file: config.timingLog }),
   // Carga el SDK (ESM) una vez, crea la sesión con sus herramientas y la arranca.
   async sessionFactory(resumeId) {
     const sdk = await loadSdk();
-    const session = new Session({ config, emit: hub.emit, sdk, timingLog: deps.timingLog });
+    const emit = (event, data) => { watchFeeds(event, data); hub.emit(event, data); };
+    const session = new Session({ config, emit, sdk, timingLog: deps.timingLog });
     session.start({ resumeId });
     return session;
   },
@@ -216,6 +309,7 @@ server.listen(PORT, '127.0.0.1', () => {
   J.A.R.V.I.S. en línea → http://localhost:${PORT}
   Claude: ${config.claudeBin || 'incluido en el SDK'}
 `);
+  feeds.start();
 });
 
-module.exports = { server, PORT, isTrusted, handleRequest, serveStatic };
+module.exports = { server, PORT, isTrusted, handleRequest, serveStatic, serveVendor };

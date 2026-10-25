@@ -4,7 +4,7 @@
 const { buildAgentOptions } = require('./agent-options');
 const { createPermissionGate, describeTool } = require('./permissions');
 const { createJarvisTools } = require('./tools');
-const { nowLine } = require('./prompt');
+const { nowLine, viewLine } = require('./prompt');
 const { startTurnTiming, trackMessage, summarizeTiming } = require('./timing');
 const { missingKeptServers, keptConnectorsSettled } = require('./mcp-filter');
 
@@ -84,8 +84,23 @@ function mapMessage(msg, state) {
     // Un bloque de texto nuevo (p. ej. la respuesta después del «Ya me fijo.» y la herramienta) arranca en otra
     // línea: si no, la interfaz pega «fijo.Hoy». El salto también cierra la frase anterior para la voz.
     if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text' && state.turnHasText) return [['delta', { text: '\n' }]];
-    if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use') return [['tool', describeTool(ev.content_block.name)]];
+    if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+      if (ev.content_block.id) (state.toolUses ||= new Map()).set(ev.content_block.id, ev.content_block.name);
+      return [['tool', describeTool(ev.content_block.name)]];
+    }
     return [];
+  }
+  // Resultado de una herramienta del orquestador: dice si de verdad corrió (una denegación vuelve como error).
+  // Lo usa el servidor para refrescar las vistas solo después de una escritura que se hizo.
+  if (msg.type === 'user' && msg.parent_tool_use_id == null && Array.isArray(msg.message?.content)) {
+    const out = [];
+    for (const b of msg.message.content) {
+      const name = b?.type === 'tool_result' && state.toolUses?.get(b.tool_use_id);
+      if (!name) continue;
+      state.toolUses.delete(b.tool_use_id);
+      out.push(['tool_result', { ...describeTool(name), ok: !b.is_error }]);
+    }
+    return out;
   }
   if (msg.type === 'result') {
     const interrupting = state.interrupting;
@@ -237,9 +252,12 @@ class Session {
     console.log(`  [SESIÓN] modelo ${init.model} · ${tools.length} herramientas (${mcpTools} de MCP) · servidores: ${servers}`);
   }
 
-  send(text, { receivedAt } = {}) {
+  // `view`: la cara del carrusel que mira la persona (opcional); va como contexto después de la fecha.
+  // `receivedAt`: cuándo llegó el mensaje al servidor, para los tiempos del turno.
+  send(text, { view, receivedAt } = {}) {
     this.state.userSince = true;
-    const uuid = this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${text}`);
+    const vl = viewLine(view);
+    const uuid = this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${vl ? vl + '\n' : ''}${text}`);
     if (uuid) { this.pushed.push(uuid); this.receivedAts.push(receivedAt ?? this.now()); }
     return uuid;
   }

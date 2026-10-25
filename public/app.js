@@ -30,6 +30,8 @@
     voicePulse: 0,    // 0..1, envolvente simulada de la voz de salida
     confirm: null,    // acción esperando un sí/no: { id, app, action, detail }
     replaced: false,  // otra ventana tomó el canal: esta queda inerte
+    camOn: store.get('camOn', true), // cámara para los gestos con la mano (siempre activa salvo que la apagues)
+    face: 'core',     // cara del carrusel que se ve: core, calendar, mail o weather
   };
 
   function setState(s) {
@@ -76,6 +78,18 @@
   let energy = 0;
   let rotY = 0, rotX = 0.35;
 
+  // Pellizco: zoom y arrastre del núcleo (ox, oy en fracción de pantalla). Se va hacia el objetivo de a poco.
+  const coreFx = { zoom: 1, ox: 0, oy: 0 };
+  const coreFxTarget = { zoom: 1, ox: 0, oy: 0 };
+  // Con una vista abierta el núcleo se achica a una esquina: 0 = centro, 1 = esquina
+  let cornerK = 0;
+  function coreLayout() {
+    const center = { cx: W / 2, cy: H * 0.47, scale: 1 };
+    const corner = { cx: W - 90 * DPR, cy: H - 170 * DPR, scale: 0.22 };
+    const k = cornerK;
+    return { cx: center.cx + (corner.cx - center.cx) * k, cy: center.cy + (corner.cy - center.cy) * k, scale: center.scale + (corner.scale - center.scale) * k };
+  }
+
   function frame(t) {
     const time = t / 1000;
     const target = COLORS[app.state] || COLORS.idle;
@@ -96,8 +110,12 @@
     ctx.globalCompositeOperation = 'source-over';
     ctx.clearRect(0, 0, W, H);
 
-    const cx = W / 2, cy = H * 0.47;
-    const R = Math.min(W, H) * 0.17 * (1 + energy * 0.25);
+    for (const k in coreFx) coreFx[k] += (coreFxTarget[k] - coreFx[k]) * 0.12;
+    cornerK += ((app.face === 'core' ? 0 : 1) - cornerK) * 0.12;
+    const L = coreLayout();
+    const cx = L.cx + coreFx.ox * W, cy = L.cy + coreFx.oy * H;
+    const R = Math.min(W, H) * 0.17 * (1 + energy * 0.25) * L.scale * coreFx.zoom;
+    const ps = Math.sqrt(L.scale); // en la esquina las partículas también se achican, si no queda una mancha
     const [cr, cg, cb] = col.map(Math.round);
 
     // Resplandor interno
@@ -124,7 +142,7 @@
       const px = cx + x1 * R * scale, py = cy + y1 * R * scale;
       const depth = (1 - z2) / 2; // 0 atrás · 1 adelante
       const a = 0.15 + depth * 0.75;
-      const s = (0.6 + depth * 1.6) * DPR * (1 + energy * 0.4);
+      const s = (0.6 + depth * 1.6) * DPR * (1 + energy * 0.4) * ps;
       ctx.fillStyle = `rgba(${cr},${cg},${cb},${a})`;
       ctx.fillRect(px, py, s, s);
     }
@@ -137,7 +155,7 @@
       const scale = fov / (fov + z * 0.5);
       const px = cx + x1 * R * scale, py = cy + y * R * scale * 0.9;
       ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.25 + energy * 0.5})`;
-      ctx.fillRect(px, py, 1.4 * DPR, 1.4 * DPR);
+      ctx.fillRect(px, py, 1.4 * DPR * ps, 1.4 * DPR * ps);
     }
 
     // Arco de nivel en el HUD
@@ -392,8 +410,10 @@
       if (stale) await stale; // que el corte llegue al servidor antes que el mensaje nuevo
       if (seq !== askSeq) return; // ESC o una pregunta nueva mientras esperaba el corte: este mensaje ya no se manda
       cur = turn; // recién ahora: lo que llegue del turno cortado no se pinta como respuesta nueva
+      // Con una vista abierta, JARVIS sabe qué mira la persona («el segundo» es el segundo de la lista visible)
+      const view = viewPayload(app.face, { shownInbox: frozen.inbox, week: feedCache.google?.data?.week });
       turn.marks.post = performance.now();
-      const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId });
+      const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId, ...(view ? { view } : {}) });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok) throw new Error('El servidor respondió ' + res.status);
     } catch (err) {
@@ -589,10 +609,14 @@
       case 'replaced': // otra ventana tomó el canal: esta se calla y no reconecta
         app.replaced = true; taskQueue.length = 0
         dropRec(); closeConfirm(); stopSpeaking();
+        stopCam(); // la otra ventana usa la cámara
         cur = null; userBusy = false; streamDone = true;
         $('replaced').hidden = false;
         $('t-link').textContent = 'CEDIDO';
         setState('idle');
+        break;
+      case 'feeds': // datos nuevos para las vistas
+        applyFeeds(data);
         break;
       case 'reset':
         cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; activeTurn = false; staleTurn = false;
@@ -640,6 +664,7 @@
         if (!res.ok || !res.body) throw new Error('El servidor respondió ' + res.status);
         fails = 0;
         $('t-link').textContent = 'ESTABLE';
+        loadFeeds(); // lo que ya tiene el servidor; lo nuevo llega por el evento `feeds`
         await readEvents(res);
       } catch (err) {
         console.warn('Canal de eventos:', err.message);
@@ -918,6 +943,9 @@
     v.textContent = app.muted ? 'VOZ · OFF' : 'VOZ · ON';
     v.classList.toggle('on', !app.muted);
     $('text-input').placeholder = app.micOn ? 'Te escucho… o escribí acá' : 'Micrófono apagado (ESPACIO para prenderlo). Escribí acá…';
+    const c = $('cam-btn');
+    c.textContent = app.camOn ? 'CÁMARA · ON' : 'CÁMARA · OFF';
+    c.classList.toggle('on', app.camOn);
   }
   $('mode-btn').addEventListener('click', (e) => { e.currentTarget.blur(); toggleMic(); });
   $('mute-btn').addEventListener('click', (e) => {
@@ -962,6 +990,167 @@
   });
 
   // ============================================================
+  //  CÁMARA Y GESTOS (hands.js entrega la mano; gestures.js la convierte en eventos)
+  // ============================================================
+  const tracker = window.JarvisGestures?.createGestureTracker();
+  const cam = { status: 'off', detail: '', hand: false };
+
+  function setHandState() {
+    const el = $('hand-state');
+    let text = 'CÁMARA APAGADA';
+    if (cam.status === 'loading') text = 'CÁMARA · INICIANDO';
+    else if (cam.status === 'on') text = cam.hand ? 'MANO DETECTADA' : 'SIN MANO';
+    else if (cam.status === 'denied') text = 'GESTOS NO DISPONIBLES: SIN PERMISO DE CÁMARA';
+    else if (cam.status === 'no-model') text = 'GESTOS NO DISPONIBLES: corré npm run modelo';
+    else if (cam.status === 'error') text = 'GESTOS NO DISPONIBLES: ' + (cam.detail || 'ERROR').slice(0, 60);
+    el.textContent = text;
+    el.classList.toggle('present', cam.status === 'on' && cam.hand);
+    el.classList.toggle('unavailable', ['denied', 'no-model', 'error'].includes(cam.status));
+  }
+
+  function startCam() {
+    if (!window.JarvisHands || !tracker || app.replaced) { if (!window.JarvisHands) { cam.status = 'error'; cam.detail = 'sin módulo de manos'; setHandState(); } return; }
+    JarvisHands.start({
+      onFrame: (t, hand) => {
+        if (DEBUG) cam.x = hand ? JarvisGestures.palmCenter(hand).x : null;
+        for (const ev of tracker.update({ t, hand })) onGesture(ev);
+      },
+      onStatus: (status, detail) => {
+        cam.status = status; cam.detail = detail || '';
+        if (status !== 'on') cam.hand = false;
+        if (status !== 'on' && status !== 'loading') {
+          console.warn('Gestos:', status, detail || '');
+          tracker.reset(); onGesture({ type: 'release' }); // p. ej. la cámara se desconectó con el núcleo agarrado
+        }
+        setHandState();
+      },
+    });
+  }
+
+  function stopCam() {
+    window.JarvisHands?.stop();
+    tracker?.reset();
+    onGesture({ type: 'release' }); // lo que estuviera agarrado vuelve a su lugar
+    cam.status = 'off'; cam.hand = false;
+    setHandState();
+  }
+
+  function toggleCam() {
+    app.camOn = !app.camOn; store.set('camOn', app.camOn); syncButtons();
+    if (app.camOn) startCam(); else stopCam();
+  }
+
+  // Un evento del rastreador: la presencia la muestra el indicador; el pellizco mueve el núcleo y el giro, el carrusel
+  function onGesture(ev) {
+    if (ev.type === 'hand') { cam.hand = ev.present; setHandState(); return; }
+    if (ev.type === 'swipe') { go(ev.dir); return; }
+    pinchGesture(ev);
+  }
+
+  // Pellizco, como en el celular: abrir y cerrar los dedos agranda o achica el núcleo; juntarlos del todo
+  // lo agarra y moverse lo arrastra. Al soltar vuelve solo a su lugar y a zoom 1. Solo en la cara del núcleo.
+  const DRAG_GAIN = 1.5; // un tercio del cuadro de la cámara mueve el núcleo media pantalla
+  function pinchGesture(ev) {
+    if (ev.type === 'release') { Object.assign(coreFxTarget, { zoom: 1, ox: 0, oy: 0 }); return; } // siempre, por las dudas
+    if (app.face !== 'core') return;
+    if (ev.type === 'zoom') coreFxTarget.zoom = ev.zoom;
+    else if (ev.type === 'drag') { coreFxTarget.ox = ev.dx * DRAG_GAIN; coreFxTarget.oy = ev.dy * DRAG_GAIN; }
+    else if (ev.type === 'ungrab') { coreFxTarget.ox = 0; coreFxTarget.oy = 0; } // deja de arrastrar; el zoom sigue al pellizco
+  }
+
+  $('cam-btn').addEventListener('click', (e) => { e.currentTarget.blur(); toggleCam(); });
+  // C: prende/apaga la cámara (no mientras escribís ni durante el arranque)
+  addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyC' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || document.activeElement === $('text-input') || app.state === 'boot') return;
+    toggleCam();
+  });
+  // ?debug: tiempo medio de detección de manos cada 5 s, y la x de la palma (si al mover la mano hacia tu
+  // izquierda sube en vez de bajar, la webcam ya viene espejada: hay que sacar el unmirror en hands.js)
+  if (DEBUG) {
+    setInterval(() => {
+      if (cam.status !== 'on') return;
+      const s = JarvisHands.takeStats();
+      console.log(`[cam] detectForVideo ${s.avgMs.toFixed(1)} ms promedio · ${s.frames} cuadros en 5 s`);
+    }, 5000);
+    setInterval(() => { if (cam.status === 'on' && cam.x != null) console.log(`[cam] palma x=${cam.x.toFixed(2)}`); }, 500);
+  }
+
+  // ============================================================
+  //  CARRUSEL DE VISTAS (Calendar, Mail y Clima; los datos ya están guardados en el servidor)
+  // ============================================================
+  const { RING, navigate, viewPayload, freezeInbox, nextFrozen } = window.JarvisNav;
+  const Faces = window.JarvisFaces;
+  app.nav = { face: 'core', from: 'core' };
+  let ringTurn = 0;           // vueltas acumuladas: de Mail al Núcleo sigue girando para el mismo lado
+  let feedCache = {};         // el último snapshot de /api/feeds: { google, weather }
+  let frozen = freezeInbox(null); // la bandeja tal como se ve, congelada mientras Mail está abierta (nav.js)
+
+  function setFace(nav) {
+    const prev = app.face;
+    app.nav = nav; app.face = nav.face;
+    document.body.dataset.face = nav.face;
+    if (nav.face !== 'core') Object.assign(coreFxTarget, { zoom: 1, ox: 0, oy: 0 }); // el pellizco es solo del núcleo
+    $('ring').style.transform = `translateZ(calc(var(--face-r) * -1)) rotateY(${-ringTurn * 120}deg)`;
+    const idx = RING.indexOf(nav.face === 'weather' ? nav.from : nav.face);
+    [...$('face-dots').children].forEach((d, i) => d.classList.toggle('on', i === idx));
+    if (nav.face === 'mail' && prev !== 'mail') { // al entrar se congela la lista que se va a ver
+      frozen = freezeInbox(feedCache.google);
+      renderMail();
+    }
+  }
+
+  function go(dir) {
+    const next = navigate(app.nav, dir);
+    if (next === app.nav) return;
+    if (dir === 'left') ringTurn++;
+    if (dir === 'right') ringTurn--;
+    setFace(next);
+  }
+
+  // En Mail abierta se pinta la lista congelada; si no, la de la caché (así al girar ya está al día)
+  function renderMail() {
+    if (app.face === 'mail') Faces.renderMail($('face-mail'), frozen.feed, frozen.inbox);
+    else Faces.renderMail($('face-mail'), feedCache.google);
+  }
+  function renderFaces() {
+    Faces.renderCalendar($('face-calendar'), feedCache.google);
+    Faces.renderWeather($('weather-face'), feedCache.weather);
+    renderMail();
+  }
+
+  // Llegaron datos nuevos. La lista de Mail abierta se actualiza si los trajo una escritura de JARVIS
+  // (un hilo que ya no está no puede seguir siendo «el segundo») o si se congeló sin datos (nextFrozen).
+  function applyFeeds(snap) {
+    feedCache = snap || {};
+    if (app.face === 'mail') frozen = nextFrozen(frozen, feedCache.google, snap?.reason);
+    renderFaces();
+  }
+
+  async function loadFeeds() {
+    try {
+      const res = await fetch('/api/feeds', { headers: { 'X-Jarvis-Token': TOKEN } });
+      if (res.ok) applyFeeds(await res.json());
+    } catch (e) { console.warn('No pude traer los datos de las vistas:', e); }
+  }
+
+  // Al volver a la pestaña, si los datos tienen más de 5 minutos, se piden de nuevo (llegan por `feeds`)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !app.replaced) post('/api/feeds/refresh', { ifOlderMs: 300000 }).catch(() => {});
+  });
+  setInterval(renderFaces, 30000); // el «actualizado hace…»
+
+  // Flechas del teclado: lo mismo que los gestos, para probar sin cámara
+  const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  addEventListener('keydown', (e) => {
+    const dir = ARROWS[e.code];
+    if (!dir || e.repeat || document.activeElement === $('text-input') || document.activeElement?.tagName === 'SELECT' || document.activeElement?.type === 'range' || app.state === 'boot') return;
+    e.preventDefault();
+    go(dir);
+  });
+  renderFaces();
+  setFace(app.nav);
+
+  // ============================================================
   //  SECUENCIA DE ARRANQUE
   // ============================================================
   const BOOT_LINES = [
@@ -979,7 +1168,7 @@
     syncButtons(); updateTelemetry();
     connectEvents();
     // ?skip salta la animación (útil al recargar); el audio se habilita con el primer clic o tecla
-    if (new URLSearchParams(location.search).has('skip')) { setState('idle'); if (app.micOn) startListening(); return; }
+    if (new URLSearchParams(location.search).has('skip')) { setState('idle'); if (app.micOn) startListening(); if (app.camOn) startCam(); return; }
     const log = $('boot-log');
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     for (const [label, status] of BOOT_LINES) {
@@ -1002,6 +1191,7 @@
     // Entra solo al terminar la animación, sin botón
     setState('idle');
     ensureMicMeter();
+    if (app.camOn) startCam();
     const intro = `${GREETING}${app.micOn ? '' : ' El micrófono está apagado, tocá la barra espaciadora para prenderlo.'}`;
     $('sub-ai').textContent = intro;
     addLog('ai', intro);

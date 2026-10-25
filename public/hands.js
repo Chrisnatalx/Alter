@@ -53,15 +53,20 @@
       // Sin modelo no tiene sentido pedir la cámara
       const head = await fetch(MODEL, { method: 'HEAD' });
       if (!head.ok) { fail(my, head.status === 404 ? 'no-model' : 'error', 'modelo: ' + head.status); return; }
+      let s;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+        s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
       } catch (e) {
         fail(my, e.name === 'NotAllowedError' || e.name === 'SecurityError' ? 'denied' : 'error', e.message || e.name);
         return;
       }
-      if (my !== gen) { for (const tr of stream.getTracks()) tr.stop(); return; }
+      // Si mientras se pedía el permiso apagaron la cámara (o arrancó otra carga), este stream no es de nadie: se corta acá
+      if (my !== gen) { for (const tr of s.getTracks()) tr.stop(); return; }
+      stream = s;
+      // La cámara se desenchufa o la toma otra app: se avisa como error, no como «sin mano»
+      for (const tr of s.getVideoTracks()) tr.addEventListener('ended', () => fail(my, 'error', 'la cámara se desconectó'));
       video = document.createElement('video'); // no se agrega al DOM: nunca se ve
-      video.muted = true; video.playsInline = true; video.srcObject = stream;
+      video.muted = true; video.playsInline = true; video.srcObject = s;
       await video.play();
       const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
       const fileset = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');

@@ -987,7 +987,10 @@
       onStatus: (status, detail) => {
         cam.status = status; cam.detail = detail || '';
         if (status !== 'on') cam.hand = false;
-        if (status !== 'on' && status !== 'loading') console.warn('Gestos:', status, detail || '');
+        if (status !== 'on' && status !== 'loading') {
+          console.warn('Gestos:', status, detail || '');
+          tracker.reset(); onGesture({ type: 'release' }); // p. ej. la cámara se desconectó con el núcleo agarrado
+        }
         setHandState();
       },
     });

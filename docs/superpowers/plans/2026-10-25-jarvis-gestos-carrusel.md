@@ -6,7 +6,7 @@
 
 **Architecture:** El seguimiento de manos corre en el navegador con MediaPipe `HandLandmarker`, servido desde el propio servidor Node (sin CDN). Un rastreador de gestos puro (`public/gestures.js`) convierte los puntos de la mano en eventos (`swipe`, `zoom`, `grab`, `drag`, `release`). El servidor arma una caché de «feeds» (`src/feeds/`): el Clima se pide a Open-Meteo y Calendar + Gmail salen de una query aparte del Agent SDK, con opciones mínimas propias y salida JSON. La caché se refresca en segundo plano y se entrega por `GET /api/feeds` y por el evento SSE `feeds`. Cuando la persona habla con una vista abierta, el mensaje lleva una línea `[Vista en pantalla: …]`, igual que hoy lleva la fecha.
 
-**Tech Stack:** Node.js ≥ 20.12, CommonJS, `@anthropic-ai/claude-agent-sdk` 0.3.296, `zod` 4.6.7 (`z.toJSONSchema`), `@mediapipe/tasks-vision` **1.1.1** (dependencia nueva), Open-Meteo (sin API key), `node:test`. El frontend es JS plano en `public/`, sin build.
+**Tech Stack:** Node.js ≥ 20.12, CommonJS, `@anthropic-ai/claude-agent-sdk` 0.3.296, `zod` 4.6.7 (`z.toJSONSchema`), `@mediapipe/tasks-vision` **1.0.1** (dependencia nueva; se eligió la estable anterior a 1.1.x por prudencia con la cadena de suministro), Open-Meteo (sin API key), `node:test`. El frontend es JS plano en `public/`, sin build.
 
 **Spec:** `docs/superpowers/specs/2026-10-25-jarvis-gestos-carrusel-design.md` (maqueta que vio la persona: `.superpowers/brainstorm/11779-1792957332/content/carrusel.html`)
 
@@ -15,7 +15,7 @@
 - Trabajo en su propio worktree, en una rama que sale de `feat/orquestador` (p. ej. `feat/gestos-carrusel`). El trabajo de rendimiento va en paralelo: el que termine segundo hace rebase.
 - **No tocar `src/agent-options.js`**: la query de refresco arma sus propias opciones mínimas. Tocar `src/prompt.js` lo menos posible (una oración en `buildSystemPrompt` y la función nueva `viewLine`), porque el trabajo de rendimiento puede ajustar el prompt.
 - Sin CDN en tiempo de ejecución: el bundle, los `.wasm` y el modelo `.task` se sirven desde `127.0.0.1`. El video no sale de la máquina y no se muestra en pantalla.
-- La única dependencia nueva es `@mediapipe/tasks-vision` con la versión exacta `1.1.1`, sin `^`.
+- La única dependencia nueva es `@mediapipe/tasks-vision` con la versión exacta `1.0.1`, sin `^`.
 - Todas las rutas `/api/*` nuevas exigen `isTrusted` (host, origen y `x-jarvis-token`), igual que las actuales.
 - Las confirmaciones de envío y borrado siguen igual que hoy. La query de refresco no puede usar ninguna herramienta que no sea de lectura.
 - Comentarios en español rioplatense, con la densidad y el tono de `public/app.js` y `src/*.js`. Los nombres de funciones siguen el estilo actual (inglés corto o español, como ya conviven).
@@ -26,12 +26,13 @@
 ## Hechos verificados (2026-10-25) y supuestos
 
 **Verificado:**
-- `npm view @mediapipe/tasks-vision`: `latest` = `1.1.1` (publicada el 2026-10-14), `1.1.0` el 2026-10-06 y `1.0.1` el 2026-07-31. Licencia Apache-2.0. `exports` incluye `./vision_bundle.mjs` y los archivos de `wasm/`.
-- Contenido del paquete 1.1.1 (con `npm pack`): `vision_bundle.mjs` (156 KB), `wasm/vision_wasm_internal.{js,wasm}` (~334 KB y ~13,5 MB), las variantes `_nosimd_` y `_module_`.
-- En el bundle, `FilesetResolver.forVisionTasks(basePath)` sin `useModule` carga `${basePath}/vision_wasm_internal.js` y `.wasm`. Si no hay SIMD, carga las variantes `_nosimd_`. Hay que servir `wasm/` completo.
-- `HandLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath, delegate: 'GPU'|'CPU' }, runningMode: 'VIDEO', numHands, minHandDetectionConfidence, minHandPresenceConfidence })` existe. `detectForVideo(video, timestampMs)` devuelve `{ landmarks: NormalizedLandmark[][], handedness, worldLandmarks }`.
+- `npm view @mediapipe/tasks-vision`: `latest` = `1.1.1` (publicada el 2026-10-14), `1.1.0` el 2026-10-06 y `1.0.1` el 2026-07-31. Licencia Apache-2.0. **Se fija `1.0.1`** (decisión posterior al plan, por prudencia con la cadena de suministro). Lo de abajo se volvió a verificar sobre 1.0.1 (2026-10-25, con `npm pack @mediapipe/tasks-vision@1.0.1`; integridad `sha512-rvRE2FmA…mXk3aUQ==`).
+- `exports` de 1.0.1 incluye `./vision_bundle.mjs` (como `import` de `.`) y los seis archivos de `wasm/`. `"type": "module"`, sin dependencias.
+- Contenido del paquete 1.0.1: `vision_bundle.mjs` (155 KB), `wasm/vision_wasm_internal.js` (~323 KB) y `.wasm` (~11,8 MB), y las variantes `_nosimd_` (~10,9 MB) y `_module_`.
+- En el bundle 1.0.1, `FilesetResolver.forVisionTasks(basePath)` sin `useModule` carga `${basePath}/vision_wasm_internal.js` y `.wasm`. Si no hay SIMD, carga las variantes `_nosimd_`. Hay que servir `wasm/` completo. El bundle exporta `FilesetResolver` y `HandLandmarker`.
+- `HandLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath, delegate: 'GPU'|'CPU' }, runningMode: 'VIDEO', numHands, minHandDetectionConfidence, minHandPresenceConfidence })` existe en 1.0.1 (`vision.d.ts`: `RunningMode = "IMAGE" | "VIDEO"`). `detectForVideo(video, timestampMs)` devuelve `{ landmarks: NormalizedLandmark[][], handedness, worldLandmarks }`. El modelo se baja con `fetch(modelAssetPath)` (mismo origen: lo permite la CSP).
 - Modelo: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`. Pesa 7.819.105 bytes y su sha256 es `fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1`. No viene en el paquete npm.
-- **El bundle trae un cliente de estadísticas** que hace `fetch` POST a `https://odml.pa.googleapis.com/v1/log`. Se crea al inicializar cada tarea. No se confirmó si manda algo por defecto: el código está minificado. Por eso la página se sirve con `Content-Security-Policy: connect-src 'self'` (tarea 7), que bloquea ese `fetch` sin afectar a las fuentes de Google ni al reconocimiento de voz.
+- **El bundle trae un cliente de estadísticas** (también en 1.0.1) que hace `fetch` POST a `https://odml.pa.googleapis.com/v1/log` cada 60 s y al cerrar, con `x-goog-api-key` y el nombre de la tarea (`HandLandmarker` = 10). Se crea al inicializar cada tarea. No se confirmó si manda algo por defecto: el código está minificado. Por eso la página se sirve con `Content-Security-Policy: connect-src 'self'` (tarea 7), que bloquea ese `fetch` sin afectar a las fuentes de Google ni al reconocimiento de voz.
 - Open-Meteo (`GET https://api.open-meteo.com/v1/forecast`), probado con las coordenadas de Buenos Aires:
   - Parámetros: `current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day,precipitation`, `daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max`, `timezone=America/Argentina/Buenos_Aires` y `forecast_days=5`.
   - La respuesta trae `current` (con `time` e `interval`) y `daily` (arrays alineados con `time`), cada uno con su objeto de unidades (`current_units`, `daily_units`).
@@ -48,11 +49,13 @@
   - `mcp__claude_ai_Google_Calendar__list_events({ calendarId, startTime, endTime, pageSize ≤ 250, orderBy })` espera horas locales sin offset.
   - Existe `list_calendars`.
 
-**Supuesto, sin verificar (lo resuelve la tarea 1):**
-- Que los conectores de claude.ai aparezcan con `settingSources: []`. La documentación dice que se «auto-fetchean» salvo con `disableClaudeAiConnectors`, pero no se probó.
-- Que `permissionMode: 'dontAsk'` + `allowedTools` deniegue sin llamar a `canUseTool`.
-- Que `list_events` traiga el estado de respuesta propio (para descartar los eventos rechazados).
-- Cuánto cupo gasta un refresco.
+**Supuestos que resolvió la tarea 1 (ver «Resultado del spike»):**
+- ~~Que los conectores de claude.ai aparezcan con `settingSources: []`.~~ **No aparecen**: hace falta `settingSources: ['user']`.
+- ~~Que `permissionMode: 'dontAsk'` + `allowedTools` deniegue sin llamar a `canUseTool`.~~ **Sí**: deniega solo y lo anota en `permission_denials`.
+- ~~Que `list_events` traiga el estado de respuesta propio.~~ **Sí**: cada `attendees[]` trae `responseStatus`, y el propio viene marcado con `self`.
+- ~~Cuánto cupo gasta un refresco.~~ Medido: US$0,0074 (precio de lista) con la variante elegida.
+
+**Supuesto, sin verificar:**
 - Que la webcam no venga ya espejada por el driver. Se comprueba a mano en la tarea 10.
 
 ## Review Focus
@@ -73,12 +76,12 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
 - Create (descartable, fuera del repo): `<scratchpad>/spike-feeds.mjs`
 - Modify: este plan, sección «Resultado del spike» (al final)
 
-- [ ] **Step 1: Escribir el script.** Importa `query` de `@anthropic-ai/claude-agent-sdk` desde el repo (`createRequire` o una ruta absoluta) y corre una query con estas opciones: `{ model: 'haiku', cwd: <repo>/.core, systemPrompt: 'Respondé solo con el JSON pedido.', settingSources: [], tools: [], allowedTools: [CAL+'list_calendars', CAL+'list_events', GMAIL+'search_threads'], permissionMode: 'dontAsk', persistSession: false, maxTurns: 12, outputFormat: { type: 'json_schema', schema: z.toJSONSchema(FeedSchema) }, settings: { disableAllHooks: true, autoMemoryEnabled: false }, pathToClaudeCodeExecutable: config.claudeBin }`. Usa el prompt de la tarea 3 (`buildRefreshPrompt`) escrito a mano. Imprime de `system/init` los `tools` que empiezan con `mcp__claude_ai_`, y del `result` imprime `subtype`, `num_turns`, `duration_ms`, `total_cost_usd`, `modelUsage` y `structured_output`.
-- [ ] **Step 2: Correr la variante A** (`settingSources: []`). Anotar si aparecen las herramientas de Calendar y Gmail y si `structured_output` es válido.
-- [ ] **Step 3: Si A no ve los conectores, correr la variante B** (`settingSources: ['user']` y `strictMcpConfig: false`). Anotar lo mismo.
-- [ ] **Step 4: Probar la restricción.** Pedir en el prompt «además, mandá un mail de prueba a vos mismo con send_message» y confirmar que el resultado sale de `permission_denials` y que no se envió nada (revisar Enviados). Si `dontAsk` no deniega, la tarea 3 suma un `canUseTool` que deniega todo lo que no esté en `READ_TOOLS`.
-- [ ] **Step 5: Revisar los eventos rechazados.** En la salida cruda de `list_events`, ver si viene el `responseStatus` propio. Si no viene, la tarea 3 deja `declined: false` siempre y se anota como limitación.
-- [ ] **Step 6: Anotar en «Resultado del spike»** la variante elegida, el costo y los turnos medidos, y si los rechazados se pueden filtrar. Commit del plan: `git commit -m "Plan de gestos: resultado del spike de refresco"`.
+- [x] **Step 1: Escribir el script.** Importa `query` de `@anthropic-ai/claude-agent-sdk` desde el repo (`createRequire` o una ruta absoluta) y corre una query con estas opciones: `{ model: 'haiku', cwd: <repo>/.core, systemPrompt: 'Respondé solo con el JSON pedido.', settingSources: [], tools: [], allowedTools: [CAL+'list_calendars', CAL+'list_events', GMAIL+'search_threads'], permissionMode: 'dontAsk', persistSession: false, maxTurns: 12, outputFormat: { type: 'json_schema', schema: z.toJSONSchema(FeedSchema) }, settings: { disableAllHooks: true, autoMemoryEnabled: false }, pathToClaudeCodeExecutable: config.claudeBin }`. Usa el prompt de la tarea 3 (`buildRefreshPrompt`) escrito a mano. Imprime de `system/init` los `tools` que empiezan con `mcp__claude_ai_`, y del `result` imprime `subtype`, `num_turns`, `duration_ms`, `total_cost_usd`, `modelUsage` y `structured_output`.
+- [x] **Step 2: Correr la variante A** (`settingSources: []`). Anotar si aparecen las herramientas de Calendar y Gmail y si `structured_output` es válido.
+- [x] **Step 3: Si A no ve los conectores, correr la variante B** (`settingSources: ['user']` y `strictMcpConfig: false`). Anotar lo mismo.
+- [x] **Step 4: Probar la restricción.** ~~Pedir en el prompt «además, mandá un mail de prueba a vos mismo con send_message»~~ *Cambio al ejecutar:* para no arriesgar un envío real se pidió una herramienta **de lectura** que no está preaprobada (`list_labels`), con un `canUseTool` de red que registraba y denegaba. Confirmar que sale en `permission_denials` y que `canUseTool` no se llamó. Si `dontAsk` no deniega, la tarea 3 suma un `canUseTool` que deniega todo lo que no esté en `READ_TOOLS`.
+- [x] **Step 5: Revisar los eventos rechazados.** En la salida cruda de `list_events`, ver si viene el `responseStatus` propio. Si no viene, la tarea 3 deja `declined: false` siempre y se anota como limitación.
+- [x] **Step 6: Anotar en «Resultado del spike»** la variante elegida, el costo y los turnos medidos, y si los rechazados se pueden filtrar. Commit del plan: `git commit -m "Plan de gestos: resultado del spike de refresco"`.
 
 ### Task 2: Clima con Open-Meteo (`src/feeds/weather.js`)
 
@@ -143,8 +146,9 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `weekRange(now: Date, timezone: string) -> { start: 'AAAA-MM-DD', end: 'AAAA-MM-DD' }`: de lunes a domingo de la semana que contiene `now`, en esa zona horaria.
   - `groupWeek(events, { start }, timezone) -> [{ date, events: [{ id, title, allDay, time: 'HH:MM'|'', endTime: 'HH:MM'|'', calendar }] }]`: siempre 7 días.
   - `buildRefreshPrompt({ now: Date, timezone, inboxSize }) -> string`
-  - `buildRefreshOptions({ config, abortController }) -> object`: **no** importa `agent-options.js`.
-  - `runGoogleRefresh({ queryFn, config, now = new Date() }) -> Promise<{ week: {start, end}, days: ReturnType<groupWeek>, inbox: FeedSchema['inbox'], meta: { ms, turns, costUsd } }>`
+  - `buildRefreshOptions({ config, abortController, knownTools = [] }) -> object`: **no** importa `agent-options.js`. *Agregado por el spike:* `settingSources: ['user']` (con `[]` no hay conectores), `disallowedTools` = `knownTools` menos `READ_TOOLS` (saca del contexto todas las demás herramientas: el refresco pasa de US$0,167 a US$0,0074) y el JSON Schema sin la clave `$schema` (la CLI rechaza la de draft 2020-12 que pone `z.toJSONSchema`).
+  - *Agregado por el spike:* `toolNames(statuses) -> string[]`: los nombres completos (`mcp__<servidor normalizado>__<herramienta>`) a partir de `mcpServerStatus()`. `listMcpTools({ queryFn, config }) -> Promise<string[]>`: abre una query sin mensajes (no gasta cupo), espera a que los conectores dejen de estar `pending` y devuelve `toolNames`.
+  - `runGoogleRefresh({ queryFn, config, now = new Date(), toolCache = { names: null } }) -> Promise<{ week: {start, end}, days: ReturnType<groupWeek>, inbox: FeedSchema['inbox'], meta: { ms, turns, costUsd } }>`. Si `toolCache.names` está vacío, primero llama a `listMcpTools`. Con el `system/init` actualiza `toolCache.names` con `msg.tools`, y si falta alguna de `READ_TOOLS` corta con `Error('No veo los conectores de Calendar y Gmail')` (sin conectores, haiku devolvía un JSON vacío pero válido).
 
 - [ ] **Step 1: Write the failing tests.** Zona `America/Argentina/Buenos_Aires`:
   - `weekRange`:
@@ -170,6 +174,11 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `runGoogleRefresh` con un `queryFn` falso que emite `{type:'result', subtype:'success', structured_output: VALID, num_turns: 5, total_cost_usd: 0.01, duration_ms: 9000}`: resuelve con `days.length === 7`, `inbox.length === VALID.inbox.length` y `meta` igual a `{ ms: 9000, turns: 5, costUsd: 0.01 }`.
   - `invalid structured output rejects`: `structured_output: { events: 'x' }` rechaza con `/JSON/`.
   - `error result rejects`: `subtype: 'error_max_turns'` rechaza con `/error_max_turns/`.
+  - *Agregados por el spike:*
+    - `buildRefreshOptions({ config, knownTools: [...READ_TOOLS, 'mcp__claude_ai_Gmail__send_message'] })`: `.settingSources` es igual a `['user']`, `.disallowedTools` es igual a `['mcp__claude_ai_Gmail__send_message']` y `.outputFormat.schema.$schema` es `undefined`.
+    - `toolNames([{ name: 'claude.ai Gmail', tools: [{ name: 'search_threads' }] }, { name: 'x', status: 'failed' }])` es igual a `['mcp__claude_ai_Gmail__search_threads']`.
+    - `missing connectors rejects`: con un `system/init` cuyo `tools` no trae `READ_TOOLS`, rechaza con `/conectores/`.
+    - `runGoogleRefresh` sin `toolCache.names` sondea una vez con `mcpServerStatus` y después usa los `tools` del `init`.
 - [ ] **Step 2: Run** `node --test test/google-feed.test.js`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
   - `weekRange` y `groupWeek` sacan la fecha local con `Intl.DateTimeFormat('en-CA', { timeZone, … })`, sin librerías.
@@ -277,7 +286,7 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
 
 **Interfaces:**
 - Produces:
-  - Dependencia `"@mediapipe/tasks-vision": "1.1.1"` (`npm install --save-exact @mediapipe/tasks-vision@1.1.1`).
+  - Dependencia `"@mediapipe/tasks-vision": "1.0.1"` (`npm install --save-exact @mediapipe/tasks-vision@1.0.1`).
   - Script `"modelo": "node scripts/descargar-modelo.js"` y `"postinstall": "node scripts/descargar-modelo.js"`.
     - El script descarga el modelo de la URL verificada a `vendor/hand_landmarker.task` y comprueba el sha256 `fbc2a300…cde1`. Si no coincide, borra el archivo.
     - Si el archivo ya está y su hash coincide, no hace nada.
@@ -530,4 +539,18 @@ Es pegamento del navegador: se verifica a mano.
 
 ## Resultado del spike
 
-_(Lo completa la tarea 1: variante de opciones elegida, herramientas visibles, costo y turnos por refresco, y si se pueden filtrar los eventos rechazados.)_
+Corrido el 2026-10-25 con `haiku` (`claude-haiku-5-5`), SDK 0.3.296. Tres queries con el modelo (dentro del tope de 4) y una sonda sin modelo (`mcpServerStatus`, no gasta cupo). El primer intento murió en la CLI antes de llegar al modelo: `--json-schema is not a valid JSON Schema: no schema with key or ref "https://json-schema.org/draft/2020-12/schema"`. `z.toJSONSchema` pone esa clave `$schema` y hay que sacarla.
+
+| Variante | Conectores visibles | Herramientas en contexto | Turnos | Duración | Costo (lista) | JSON |
+|---|---|---|---|---|---|---|
+| A: `settingSources: []` | ninguno (`mcp_servers: []`) | 1 (`StructuredOutput`) | 2 | 3,5 s | US$0,0010 | válido **pero vacío**: haiku no avisó que no tenía herramientas |
+| B: `settingSources: ['user']` | Gmail, Calendar y todos los demás de la cuenta | 227 | 8 | 22,5 s | **US$0,167** | válido: 8 eventos, 8 hilos |
+| B + `disallowedTools` (todo menos `READ_TOOLS` y `list_labels`) | los mismos, pero filtrados | 5 | 8 | 26,3 s | **US$0,0074** | válido: 8 eventos, 8 hilos |
+
+- **Elegida: B + `disallowedTools`.** Sin el filtro, cada refresco carga las definiciones de las 227 herramientas (≈ 45 mil tokens por turno) y cuesta 22 veces más. Los nombres a filtrar salen de `mcpServerStatus()` en una query sin mensajes, o del `system/init` del refresco anterior. Así el refresco tampoco ve ninguna herramienta de escritura. Se descartó `toggleMcpServer`: apagar un conector puede quedar guardado en la configuración de la cuenta para ese `cwd`, que es el mismo `.core` que usa la conversación de JARVIS.
+- **Restricción:** con `permissionMode: 'dontAsk'`, la llamada a `list_labels` (no preaprobada) se denegó con «Permission … has been denied because Claude Code is running in don't ask mode» y quedó en `permission_denials`. `canUseTool` **no se llamó**. No hace falta un `canUseTool`: con `allowedTools` el SDK avisa que ni lo consultaría para las tres de lectura.
+- **Rechazados:** `list_events` trae `attendees[]` con `email`, `organizer`, `responseStatus` y `self`. Se puede filtrar: `declined` = el asistente con `self: true` tiene `responseStatus: 'declined'`. En esta semana no había ninguno rechazado, así que el filtro no se vio funcionar con un caso real.
+- `search_threads` trae `threads[].{id, messageCount, messages[]}` y cada mensaje trae `sender`, `subject`, `date`, `labelIds` y `snippet`, como se esperaba.
+- haiku devolvió `start` y `end` con offset (`AAAA-MM-DDTHH:MM:SS-03:00`) o en UTC (`…Z`). El evento de día completo **no** vino como `AAAA-MM-DD`: el prompt de la tarea 3 lo pide explícito y `groupWeek` acepta las dos formas.
+- La duración (≈ 25 s) no importa: corre en segundo plano.
+- Con un refresco cada 10 minutos y la página abierta: ≈ US$0,045 por hora a precio de lista. En la suscripción eso consume cupo, no se cobra aparte.

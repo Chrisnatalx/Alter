@@ -41,8 +41,8 @@ module.exports = Object.freeze({
   timezone: resolveTimezone(process.env.JARVIS_TIMEZONE),
   claudeBin: resolveClaudeBin(),
   confirmTimeoutMs: 2 * 60 * 1000, // sin respuesta en 2 minutos → se deniega
-  // Experimental: solo los conectores que JARVIS conserva (1 = encendido)
-  mcpFilter: process.env.JARVIS_MCP_FILTER === '1',
+  // Solo los conectores que JARVIS conserva (Gmail, Calendar, Drive, GitHub y Discord); '0' carga todos los de la cuenta
+  mcpFilter: process.env.JARVIS_MCP_FILTER !== '0',
   // Una frase corta antes de cada herramienta, para que la voz arranque antes; '0' lo apaga
   promptPreamble: process.env.JARVIS_PROMPT_PREAMBLE !== '0',
   // Registro local de tiempos por turno (JSONL); '0' lo apaga

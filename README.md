@@ -2,7 +2,7 @@
 
 Interfaz de voz futurista para conversar con Claude usando **tu suscripción**. No usa API key: el servidor local usa el [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk), que autentica con tu login de Claude Code.
 
-JARVIS tiene acceso a tus **conectores y plugins** (Gmail, Google Calendar, Drive, GitHub, etc.) y a búsqueda web. Lee y busca sin preguntar; **solo te pide confirmación antes de enviar o borrar algo**, por voz («sí» / «no») o con un botón.
+JARVIS tiene acceso a tus conectores de **Gmail, Google Calendar, Google Drive y GitHub**, al plugin de Discord y a búsqueda web (los demás conectores de tu cuenta no se cargan, para que responda más rápido: ver `JARVIS_MCP_FILTER`). Lee y busca sin preguntar; **solo te pide confirmación antes de enviar o borrar algo**, por voz («sí» / «no») o con un botón.
 
 ## Puesta en marcha, paso a paso
 JARVIS usa **tu** cuenta de Claude y **tus** conectores: cada persona lo configura con lo suyo, y en el repo no queda ningún dato personal.
@@ -92,6 +92,7 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
 | `JARVIS_AGENT_<NOMBRE>_MODEL` | `haiku` (agenda), `sonnet` (correo, investigador) | Modelo de cada subagente: `AGENDA`, `CORREO` o `INVESTIGADOR` (ver [Subagentes](#subagentes-y-tareas-en-segundo-plano)) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
+| `JARVIS_MCP_FILTER` | prendido | JARVIS carga solo Gmail, Google Calendar, Google Drive, GitHub y el plugin de Discord (más sus herramientas propias), en vez de todos los conectores y servidores MCP de tu cuenta: unas 100 herramientas en lugar de 230. Antes del primer mensaje espera a que esos conectores terminen de conectar. Si falta alguno, avisa en la consola (`[AVISO] Con el filtro de MCP faltan: …`). Las confirmaciones no cambian. `0` carga todos |
 | `JARVIS_PROMPT_PREAMBLE` | prendido | Antes de usar una herramienta, JARVIS dice una frase muy corta y variada («Ya me fijo.», «Dame un segundo.»), así la voz arranca mientras corre la consulta: la primera frase bajó de unos 6 a 8 s a cerca de 1 s. `0` lo apaga |
 | `JARVIS_TIMING_LOG` | `logs/tiempos.jsonl` | Registro local de tiempos por turno (ver [Tiempos de respuesta](#tiempos-de-respuesta)). `0` lo apaga |
 
@@ -110,6 +111,14 @@ Hay tres tipos de registro (campo `tipo`):
 - **`voz`**, uno por turno, lo manda la interfaz (`POST /api/timing`). Los valores son de `performance.now()` en la página: `speechEnd` (último resultado del reconocedor), `final` (frase cerrada), `post` (mensaje enviado), `firstQueued` (primera frase entregada a la voz) y `speechStart` (empezó a sonar), más las diferencias `endToFinalMs`, `finalToPostMs`, `postToSpeechStartMs` y `speechEndToSpeechStartMs`. Con la voz silenciada, `speechStart` queda en `null`.
 
 En la interfaz, la fila **VOZ** de la telemetría muestra el tiempo desde que dejaste de hablar hasta que JARVIS empezó a sonar (o desde el envío, si escribiste), y al pasar el mouse muestra el desglose por etapa.
+
+### Medir la voz (lo hacés vos)
+El guion no puede hablar por micrófono: los tiempos de voz salen de tu uso real.
+1. Arrancá `jarvis` y abrí la interfaz en Chrome o Edge (con `?debug` en la dirección ves además qué oye el micrófono).
+2. Hablale con normalidad al menos 8 veces: saludos, «¿qué tengo hoy?», «leé mi último mail» o lo que uses siempre.
+3. Mirá la fila **VOZ** después de cada respuesta. Pasando el mouse ves el desglose.
+4. Probá también una vez con **MUTE** (igual tiene que quedar el registro, sin hora de voz) y una vez cortando con **ESC** (ese turno no se registra).
+5. En la carpeta de JARVIS, corré `node scripts/medir.js --voz logs/tiempos.jsonl`. Te da las medianas de habla→final (cuánto tarda el reconocedor en cerrar la frase), envío→voz y habla→voz.
 
 ### Medir tiempos
 `scripts/medir.js` compara configuraciones con un set fijo de cuatro pedidos (un saludo, «qué tengo hoy», «leé mi último mail» y una búsqueda web). Levanta su propio servidor (puerto 7789, o `MEDIR_PORT`), manda los cuatro pedidos 3 veces (o `MEDIR_RUNS`), rechaza toda confirmación y corta con código 2 si el servidor llegara a permitir un envío. Cada corrida usa una sesión nueva (`POST /api/new` entre corridas), para que ninguna repetición se conteste con lo que ya estaba en la conversación. Por eso el primer pedido de cada corrida (el saludo) incluye crear la sesión y se reporta aparte, como arranque en frío. Con `MEDIR_DELEGACION=1`, al final y con la sesión tibia, pide una investigación larga y anota si la delega en el `investigador` en segundo plano y cuánto tarda en volver a hablar con el resultado (unos 2 turnos más).

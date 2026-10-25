@@ -6,7 +6,9 @@ const { createPermissionGate, describeTool } = require('./permissions');
 const { createJarvisTools } = require('./tools');
 const { nowLine } = require('./prompt');
 const { startTurnTiming, trackMessage, summarizeTiming } = require('./timing');
-const { missingKeptServers } = require('./mcp-filter');
+const { missingKeptServers, keptConnectorsSettled } = require('./mcp-filter');
+
+const MCP_WAIT_MS = 10000; // tope para esperar los conectores conservados antes del primer mensaje
 const crypto = require('crypto');
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -129,8 +131,24 @@ class Session {
       mcpServers: { jarvis: this.tools },
     });
     if (resumeId && UUID.test(resumeId)) options.resume = resumeId;
-    this.q = this.queryFn({ prompt: this.queue.iterable, options });
+    const prompt = this.config.mcpFilter ? this._afterKeptConnectors(this.queue.iterable) : this.queue.iterable;
+    this.q = this.queryFn({ prompt, options });
     this._consume();
+  }
+
+  // Con el filtro de MCP, el SDK recibe el primer mensaje cuando los conectores conservados ya conectaron.
+  // Solo lee el estado: no apaga ni prende nada.
+  async *_afterKeptConnectors(iterable) {
+    try {
+      await Promise.resolve(); // this.q queda asignado apenas vuelve queryFn
+      const until = Date.now() + MCP_WAIT_MS;
+      for (;;) {
+        this.mcpStatus = (await this.q.mcpServerStatus()) || [];
+        if (keptConnectorsSettled(this.mcpStatus) || Date.now() >= until) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } catch { /* sin mcpServerStatus: se sigue igual, el aviso sale del init */ }
+    yield* iterable;
   }
 
   async _consume() {
@@ -178,7 +196,8 @@ class Session {
     const mcpTools = tools.filter((t) => t.startsWith('mcp__')).length;
     const mcp = init.mcp_servers || [];
     // Con el filtro, un conservado que falta haría perder herramientas sin aviso: se registra y se avisa
-    const faltan = this.config.mcpFilter ? missingKeptServers(mcp) : undefined;
+    // (el init llega antes que los conectores de claude.ai: si se leyó el estado real, vale ese)
+    const faltan = this.config.mcpFilter ? missingKeptServers(this.mcpStatus?.length ? this.mcpStatus : mcp) : undefined;
     this.timingLog.write({
       tipo: 'sesion', fecha: new Date().toISOString(), model: init.model,
       tools: tools.length, mcpTools, mcp, skills: (init.skills || []).length, agents: init.agents ?? [], faltan,

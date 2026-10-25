@@ -56,10 +56,17 @@ function buildMcpFilterSettings(opts) {
   };
 }
 
+// ¿Ya terminaron de conectar (bien o mal) los conectores de claude.ai conservados? Con el filtro, el init llega
+// antes que ellos, y un primer turno sin sus herramientas termina delegando en un subagente (probado: 27 s).
+function keptConnectorsSettled(mcpStatus) {
+  const byName = new Map((mcpStatus || []).map((s) => [s.name, s.status]));
+  return KEPT_MCP_SERVERS.filter((n) => n.startsWith('claude.ai ')).every((n) => byName.has(n) && byName.get(n) !== 'pending');
+}
+
 // Conservados o propios que no aparecen o no quedaron conectados (p. ej. un needs-auth o una URL que cambió)
 function missingKeptServers(mcpServers) {
   const connected = new Set((mcpServers || []).filter((s) => s.status === 'connected').map((s) => s.name));
   return [...KEPT_MCP_SERVERS, ...OWN_MCP_SERVERS].filter((n) => !connected.has(n));
 }
 
-module.exports = { KEPT_CONNECTOR_URLS, KEPT_MCP_SERVERS, OWN_MCP_SERVERS, pluginServerCommands, buildMcpFilterSettings, missingKeptServers };
+module.exports = { KEPT_CONNECTOR_URLS, KEPT_MCP_SERVERS, OWN_MCP_SERVERS, pluginServerCommands, buildMcpFilterSettings, keptConnectorsSettled, missingKeptServers };

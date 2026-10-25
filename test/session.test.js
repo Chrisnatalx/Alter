@@ -397,6 +397,40 @@ test('timing: el turno de la persona emite timing antes de done y lo registra', 
   s.close();
 });
 
+test('con el filtro, el primer mensaje espera a que los conectores conservados terminen de conectar', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const kept = ['claude.ai Gmail', 'claude.ai Google Calendar', 'claude.ai Google Drive', 'claude.ai GitHub'];
+  const answers = [
+    [{ name: 'jarvis', status: 'connected', source: 'sdk' }], // al principio los de claude.ai todavía no están
+    [...kept.map((name) => ({ name, status: 'pending', source: 'claudeai' }))],
+    [...kept.map((name) => ({ name, status: 'connected', source: 'claudeai' })), { name: 'jarvis', status: 'connected', source: 'sdk' }, { name: 'plugin:discord:discord', status: 'failed', source: 'plugin' }],
+  ];
+  let asked = 0;
+  let askedWhenFirst = null;
+  const log = spyLog();
+  const queryFn = ({ prompt }) => ({
+    async *[Symbol.asyncIterator]() {
+      await prompt[Symbol.asyncIterator]().next(); // el SDK lee el primer mensaje
+      askedWhenFirst = asked;
+      yield init; // init temprano: sin los conectores de claude.ai
+      await new Promise(() => {});
+    },
+    async mcpServerStatus() { return answers[Math.min(asked++, answers.length - 1)]; },
+    async toggleMcpServer() { throw new Error('no se usa nunca'); },
+    close() {},
+  });
+  const s = new Session({ config: { ...config, mcpFilter: true }, emit: () => {}, sdk: fakeSdk, queryFn, timingLog: log });
+  s.send('hola');
+  s.start({});
+  for (let i = 0; i < 50 && askedWhenFirst === null; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(askedWhenFirst, 3); // recién con la tercera respuesta (todo conectado) sale el mensaje
+  await tick();
+  const sesion = log.records.find((r) => r.tipo === 'sesion');
+  assert.deepEqual(sesion.faltan, ['plugin:discord:discord']); // usa el estado real, no el init temprano
+  s.close();
+});
+
 test('con el filtro de MCP, el registro sesion lista los conservados que faltan y avisa', async (t) => {
   t.mock.method(console, 'log', () => {});
   const warn = t.mock.method(console, 'warn', () => {});

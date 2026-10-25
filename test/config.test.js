@@ -27,6 +27,12 @@ test('el preámbulo está prendido salvo con JARVIS_PROMPT_PREAMBLE=0', () => {
   assert.equal(configWith({ JARVIS_PROMPT_PREAMBLE: '0' }, 'promptPreamble'), false);
 });
 
+test('el filtro de MCP está prendido salvo con JARVIS_MCP_FILTER=0', () => {
+  assert.equal(configWith({ JARVIS_MCP_FILTER: '' }, 'mcpFilter'), true);
+  assert.equal(configWith({ JARVIS_MCP_FILTER: '1' }, 'mcpFilter'), true);
+  assert.equal(configWith({ JARVIS_MCP_FILTER: '0' }, 'mcpFilter'), false);
+});
+
 test('JARVIS_TIMEZONE válida se respeta sin avisos', () => {
   const { out, err } = tzWith('America/Argentina/Buenos_Aires');
   assert.equal(out, 'America/Argentina/Buenos_Aires');

@@ -81,14 +81,23 @@ const VALID = {
 const INIT = { type: 'system', subtype: 'init', tools: [...READ_TOOLS, 'StructuredOutput'] };
 const ok = (over = {}) => ({ type: 'result', subtype: 'success', is_error: false, structured_output: VALID, num_turns: 5, total_cost_usd: 0.01, duration_ms: 9000, ...over });
 
-// Devuelve un queryFn que registra las llamadas. La sonda (prompt no string) responde mcpServerStatus.
-function fakeQueryFn(messages, statuses = []) {
+// Gmail y Calendar conectados, como los ve el refresco antes de mandar el prompt
+const CONNECTED = [{ name: 'claude.ai Gmail', status: 'connected', tools: [] }, { name: 'claude.ai Google Calendar', status: 'connected', tools: [] }];
+
+// Devuelve un queryFn que registra las llamadas. La sonda (sin outputFormat) responde `statuses`; el refresco
+// responde CONNECTED (o `refreshStatuses`), espera el prompt de la entrada y después emite `messages`.
+function fakeQueryFn(messages, statuses = [], refreshStatuses = CONNECTED) {
   const calls = [];
   const fn = ({ prompt, options }) => {
-    calls.push({ prompt, options });
-    const isProbe = typeof prompt !== 'string';
-    const gen = (async function* () { if (!isProbe) for (const m of messages) yield m; })();
-    gen.mcpServerStatus = async () => statuses;
+    const call = { prompt, options, sent: [] };
+    calls.push(call);
+    const isProbe = !options.outputFormat;
+    const gen = (async function* () {
+      if (isProbe) return;
+      for await (const m of prompt) { call.sent.push(m); break; } // el prompt llega recién con los conectores listos
+      for (const m of messages) yield m;
+    })();
+    gen.mcpServerStatus = async () => (isProbe ? statuses : refreshStatuses);
     gen.close = () => {};
     return gen;
   };
@@ -134,7 +143,7 @@ test('runGoogleRefresh sin lista de herramientas sondea una vez antes de la quer
   const toolCache = { names: null, at: 0 };
   await runGoogleRefresh({ queryFn, config, toolCache, logger: quiet });
   assert.equal(queryFn.calls.length, 2);
-  assert.notEqual(typeof queryFn.calls[0].prompt, 'string');
+  assert.equal(queryFn.calls[0].options.outputFormat, undefined); // la primera es la sonda
   assert.deepEqual(queryFn.calls[1].options.disallowedTools, ['mcp__claude_ai_Gmail__send_message']);
   await runGoogleRefresh({ queryFn, config, toolCache, logger: quiet });
   assert.equal(queryFn.calls.length, 3); // la segunda vez usa la lista guardada
@@ -152,6 +161,101 @@ test('listMcpTools espera a que no queden conectores pendientes', async () => {
   };
   assert.deepEqual(await listMcpTools({ queryFn, config, pollMs: 1 }), ['mcp__claude_ai_Gmail__search_threads']);
   assert.equal(n, 3);
+});
+
+// ---- Revisión: solo lectura a prueba de fallas, sonda con tope, fechas ----
+test('una herramienta de más en el init corta el refresco', async () => {
+  const queryFn = fakeQueryFn([{ type: 'system', subtype: 'init', tools: [...READ_TOOLS, 'StructuredOutput', 'mcp__claude_ai_Gmail__send_message'] }, ok()]);
+  const toolCache = fresh();
+  await assert.rejects(runGoogleRefresh({ queryFn, config, toolCache, logger: quiet }), /solo lectura/);
+  assert.equal(toolCache.names, null);
+});
+
+test('el init sin StructuredOutput igual vale si trae solo las de lectura', async () => {
+  const queryFn = fakeQueryFn([{ type: 'system', subtype: 'init', tools: [...READ_TOOLS] }, ok()]);
+  const r = await runGoogleRefresh({ queryFn, config, toolCache: fresh(), logger: quiet });
+  assert.equal(r.days.length, 7);
+});
+
+test('canUseTool deniega todo lo que no sea de lectura', async () => {
+  const { canUseTool } = buildRefreshOptions({ config });
+  assert.equal((await canUseTool('mcp__claude_ai_Gmail__send_message', { to: 'x' })).behavior, 'deny');
+  assert.equal((await canUseTool('WebSearch', {})).behavior, 'deny');
+  const okRead = await canUseTool(READ_TOOLS[0], { a: 1 });
+  assert.equal(okRead.behavior, 'allow');
+  assert.deepEqual(okRead.updatedInput, { a: 1 });
+});
+
+test('solo se conectan los servidores de Gmail y Calendar (por URL)', () => {
+  const urls = buildRefreshOptions({ config }).settings.allowedMcpServers.map((s) => s.serverUrl);
+  assert.deepEqual(urls, ['https://gmailmcp.googleapis.com/*', 'https://calendarmcp.googleapis.com/*']);
+});
+
+test('una sonda colgada vence y no deja el refresco esperando', async () => {
+  let closed = false;
+  const queryFn = () => {
+    const gen = (async function* () {})();
+    gen.mcpServerStatus = () => new Promise(() => {}); // nunca contesta
+    gen.close = () => { closed = true; };
+    return gen;
+  };
+  await assert.rejects(listMcpTools({ queryFn, config, timeoutMs: 30 }), /tardó/);
+  assert.equal(closed, true);
+});
+
+test('weekRange no depende de los nombres de los días', () => {
+  // Todos los días de una semana dan el mismo lunes, también cerca de la medianoche
+  for (let d = 26; d <= 31; d++) assert.equal(weekRange(new Date(`2026-10-${d}T23:59:00-03:00`), tz).start, '2026-10-26');
+  assert.equal(weekRange(new Date('2026-11-01T00:01:00-03:00'), tz).start, '2026-10-26');
+  assert.equal(weekRange(new Date('2026-11-02T00:01:00-03:00'), tz).start, '2026-11-02');
+  assert.equal(weekRange(new Date('2026-10-26T12:00:00Z'), 'Asia/Tokyo').start, '2026-10-26');
+});
+
+test('un evento con hora que cruza la medianoche aparece en cada día', () => {
+  const days = groupWeek([{ id: 'n', title: 'Guardia', start: '2026-10-27T22:00:00-03:00', end: '2026-10-29T02:00:00-03:00', allDay: false, declined: false, calendar: 'c' }], { start: '2026-10-26' }, tz);
+  assert.deepEqual(days.map((d) => d.events.length), [0, 1, 1, 1, 0, 0, 0]);
+  assert.equal(days[1].events[0].time, '22:00');
+  assert.equal(days[2].events[0].continued, true);
+  assert.equal(days[3].events[0].endTime, '02:00');
+});
+
+test('un evento que termina justo a la medianoche no ocupa el día siguiente', () => {
+  const days = groupWeek([{ id: 'm', title: 'Cena', start: '2026-10-27T21:00:00-03:00', end: '2026-10-28T00:00:00-03:00', allDay: false, declined: false, calendar: 'c' }], { start: '2026-10-26' }, tz);
+  assert.deepEqual(days.map((d) => d.events.length), [0, 1, 0, 0, 0, 0, 0]);
+});
+
+test('los eventos que empezaron antes del lunes entran en la semana', () => {
+  const events = [
+    { id: 'v', title: 'Vacaciones', start: '2026-10-20', end: '2026-10-28', allDay: true, declined: false, calendar: 'c' },
+    { id: 'h', title: 'Vuelo', start: '2026-10-25T23:00:00-03:00', end: '2026-10-26T03:00:00-03:00', allDay: false, declined: false, calendar: 'c' },
+  ];
+  const days = groupWeek(events, { start: '2026-10-26' }, tz);
+  assert.deepEqual(days[0].events.map((e) => e.id), ['v', 'h']);
+  assert.deepEqual(days[1].events.map((e) => e.id), ['v']);
+  assert.equal(days[0].events[1].continued, true);
+});
+
+test('el prompt sale recién cuando Gmail y Calendar están conectados', async () => {
+  const queryFn = fakeQueryFn([INIT, ok()]);
+  await runGoogleRefresh({ queryFn, config, toolCache: fresh(), logger: quiet });
+  const sent = queryFn.calls[0].sent;
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'user');
+  assert.match(sent[0].message.content, /list_calendars/);
+});
+
+test('si los conectores no conectan, el refresco falla sin mandar el prompt', async () => {
+  const pending = [{ name: 'claude.ai Gmail', status: 'pending' }, { name: 'claude.ai Google Calendar', status: 'failed' }];
+  const queryFn = fakeQueryFn([INIT, ok()], [], pending);
+  await assert.rejects(runGoogleRefresh({ queryFn, config, toolCache: fresh(), logger: quiet, connectTimeoutMs: 50 }), /conectores/);
+  assert.equal(queryFn.calls[0].sent.length, 0);
+});
+
+test('el refresco lleva la zona horaria y el día de hoy del servidor', async () => {
+  const queryFn = fakeQueryFn([INIT, ok()]);
+  const r = await runGoogleRefresh({ queryFn, config, now: new Date('2026-10-28T01:00:00Z'), toolCache: fresh(), logger: quiet });
+  assert.equal(r.timezone, config.timezone);
+  assert.match(r.today, /^\d{4}-\d{2}-\d{2}$/);
 });
 
 test('FeedSchema rechaza campos de tipo equivocado', () => {

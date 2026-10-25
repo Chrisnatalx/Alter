@@ -18,7 +18,13 @@
   const dayName = (ymd) => new Date(ymd + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '').toUpperCase();
   const dayNum = (ymd) => String(Number(ymd.slice(8, 10)));
   const monthName = (ymd) => new Date(ymd + 'T12:00:00').toLocaleDateString('es-AR', { month: 'short' }).replace('.', '').toUpperCase();
-  const localYmd = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // «Hoy» en la zona horaria del servidor (la de los eventos), no la del navegador
+  function todayIn(timeZone) {
+    try {
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+      return `${p.year}-${p.month}-${p.day}`;
+    } catch { return null; }
+  }
   const num = (v, digits = 0) => (typeof v === 'number' ? v.toLocaleString('es-AR', { maximumFractionDigits: digits }) : '—');
 
   // Encabezado común: título y «actualizado hace…», o el error si no hay nada que mostrar
@@ -40,12 +46,14 @@
     const week = g?.week;
     head(el, week ? `SEMANA · ${dayNum(week.start)} ${monthName(week.start)} – ${dayNum(week.end)} ${monthName(week.end)}` : 'SEMANA', google);
     const grid = h('div', 'week');
-    const today = localYmd();
+    const today = (g?.timezone && todayIn(g.timezone)) || g?.today;
     for (const day of g?.days || []) {
       const col = h('div', 'day' + (day.date === today ? ' today' : ''));
       col.append(h('b', '', `${dayName(day.date)} ${dayNum(day.date)}`));
       for (const ev of day.events) {
-        const row = h('div', 'ev' + (ev.allDay ? ' allday' : ''), ev.allDay ? ev.title : `${ev.time} ${ev.title}`);
+        // Lo que viene del día anterior (cruzó la medianoche o empezó antes del lunes) va con «…» y su hora de fin
+        const label = ev.allDay ? ev.title : ev.continued ? `… ${ev.title}${ev.endTime ? ' (hasta ' + ev.endTime + ')' : ''}` : `${ev.time} ${ev.title}`;
+        const row = h('div', 'ev' + (ev.allDay ? ' allday' : '') + (ev.continued ? ' continued' : ''), label);
         row.title = [ev.allDay ? 'Todo el día' : `${ev.time}${ev.endTime ? '–' + ev.endTime : ''}`, ev.title, ev.calendar].filter(Boolean).join(' · ');
         col.append(row);
       }

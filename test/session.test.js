@@ -59,6 +59,19 @@ test('mapMessage: tool_use del orquestador emite tool', () => {
   assert.deepEqual(mapMessage(msg, mkState()), [['tool', { app: 'búsqueda web', action: '' }]]);
 });
 
+test('mapMessage: el resultado de una herramienta del orquestador emite tool_result (ok o con error)', () => {
+  const state = mkState();
+  const start = (id, name) => ({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', content_block: { type: 'tool_use', id, name } } });
+  const result = (id, isError, parent = null) => ({ type: 'user', parent_tool_use_id: parent, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: 'x' }] } });
+  mapMessage(start('tu1', 'mcp__claude_ai_Gmail__send_message'), state);
+  mapMessage(start('tu2', 'mcp__claude_ai_Gmail__create_draft'), state);
+  assert.deepEqual(mapMessage(result('tu1', true), state), [['tool_result', { app: 'Gmail', action: 'send message', ok: false }]]);
+  assert.deepEqual(mapMessage(result('tu2', false), state), [['tool_result', { app: 'Gmail', action: 'create draft', ok: true }]]);
+  assert.deepEqual(mapMessage(result('tu1', false), state), []); // ya contestado: no se repite
+  assert.deepEqual(mapMessage(result('zzz', false), state), []); // de un subagente o desconocido: nada
+  assert.deepEqual(mapMessage({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: 'hola' } }, state), []);
+});
+
 test('mapMessage: task_started y background_tasks_changed', () => {
   const state = mkState();
   assert.deepEqual(

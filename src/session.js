@@ -74,8 +74,23 @@ function mapMessage(msg, state) {
     if (msg.parent_tool_use_id != null) return []; // texto y herramientas de un subagente: no se leen en voz alta
     const ev = msg.event;
     if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') return [['delta', { text: ev.delta.text }]];
-    if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use') return [['tool', describeTool(ev.content_block.name)]];
+    if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+      if (ev.content_block.id) (state.toolUses ||= new Map()).set(ev.content_block.id, ev.content_block.name);
+      return [['tool', describeTool(ev.content_block.name)]];
+    }
     return [];
+  }
+  // Resultado de una herramienta del orquestador: dice si de verdad corrió (una denegación vuelve como error).
+  // Lo usa el servidor para refrescar las vistas solo después de una escritura que se hizo.
+  if (msg.type === 'user' && msg.parent_tool_use_id == null && Array.isArray(msg.message?.content)) {
+    const out = [];
+    for (const b of msg.message.content) {
+      const name = b?.type === 'tool_result' && state.toolUses?.get(b.tool_use_id);
+      if (!name) continue;
+      state.toolUses.delete(b.tool_use_id);
+      out.push(['tool_result', { ...describeTool(name), ok: !b.is_error }]);
+    }
+    return out;
   }
   if (msg.type === 'result') {
     const interrupting = state.interrupting;

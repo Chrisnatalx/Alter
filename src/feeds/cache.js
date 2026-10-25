@@ -2,9 +2,11 @@
 // quedan en memoria: girar el carrusel no espera a nadie ni gasta un turno de la conversación.
 
 // Por tipo de feed: una sola carga a la vez; si falla, se conserva lo anterior y se anota el error.
-function createFeedCache({ loaders, intervalMs, hasClient, emit, now = Date.now, timers = { setInterval, clearInterval } }) {
+// Después de una falla, los refrescos de rutina (al conectar, al volver a la pestaña, el intervalo) esperan
+// `errorBackoffMs`; el que pide una escritura de JARVIS pasa igual.
+function createFeedCache({ loaders, intervalMs, hasClient, emit, now = Date.now, timers = { setInterval, clearInterval }, errorBackoffMs = 2 * 60 * 1000 }) {
   const kinds = Object.keys(loaders);
-  const state = Object.fromEntries(kinds.map((k) => [k, { data: null, updatedAt: null, error: null, refreshing: false }]));
+  const state = Object.fromEntries(kinds.map((k) => [k, { data: null, updatedAt: null, error: null, lastErrorAt: null, refreshing: false }]));
   const inflight = {};
   const again = {}; // pedido por escritura mientras había una carga en curso: se repite al terminar
   let timer = null;
@@ -27,11 +29,12 @@ function createFeedCache({ loaders, intervalMs, hasClient, emit, now = Date.now,
       return again[kind];
     }
     if (ifOlderMs != null && st.updatedAt != null && now() - st.updatedAt < ifOlderMs) return Promise.resolve();
+    if (reason !== 'write' && st.error && st.lastErrorAt != null && now() - st.lastErrorAt < errorBackoffMs) return Promise.resolve();
     st.refreshing = true;
     inflight[kind] = Promise.resolve()
       .then(() => loaders[kind]())
       .then((data) => { st.data = data; st.updatedAt = now(); st.error = null; },
-        (err) => { st.error = err?.message || String(err); console.warn(`  [FEEDS] ${kind}: ${st.error}`); })
+        (err) => { st.error = err?.message || String(err); st.lastErrorAt = now(); console.warn(`  [FEEDS] ${kind}: ${st.error}`); })
       .then(() => { st.refreshing = false; inflight[kind] = null; publish(reason); });
     return inflight[kind];
   }
@@ -59,16 +62,19 @@ const READ_ACTIONS = new Set([
 ]);
 const WATCHED_APPS = new Set(['Gmail', 'Google Calendar']);
 
-// Mira los eventos de la sesión: si en un turno JARVIS usó una herramienta de Gmail o Calendar que no es
-// de lectura (respondió, archivó, borró, creó un evento…), al terminar ese turno pide un refresco.
-function createFeedWatcher(onDirty) {
+// Mira los eventos de la sesión: si en un turno corrió de verdad una herramienta de Gmail o Calendar que no
+// es de lectura (respondió, archivó, borró, creó un evento…), al terminar ese turno pide un refresco.
+// «De verdad» = su `tool_result` llegó sin error: una confirmación rechazada o un turno cortado no cuentan.
+// Sin navegador conectado no pide nada: nadie está mirando las vistas.
+function createFeedWatcher(onDirty, { hasClient = () => true } = {}) {
   let dirty = false;
   return (event, data) => {
-    if (event === 'tool') {
-      if (WATCHED_APPS.has(data?.app) && !READ_ACTIONS.has(data?.action)) dirty = true;
-    } else if ((event === 'done' || event === 'error') && dirty) {
+    if (event === 'tool_result') {
+      if (data?.ok && WATCHED_APPS.has(data.app) && !READ_ACTIONS.has(data.action)) dirty = true;
+    } else if (event === 'done' || event === 'error') {
+      const fire = dirty && hasClient();
       dirty = false;
-      onDirty();
+      if (fire) onDirty();
     }
   };
 }

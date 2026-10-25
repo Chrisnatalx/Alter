@@ -275,7 +275,7 @@ const feeds = createFeedCache({
   emit: hub.emit,
 });
 // Si JARVIS respondió, archivó o borró algo en Gmail o Calendar, al terminar el turno se refresca
-const watchFeeds = createFeedWatcher(() => feeds.refresh('google', { reason: 'write' }));
+const watchFeeds = createFeedWatcher(() => feeds.refresh('google', { reason: 'write' }), { hasClient: hub.hasClient });
 const deps = {
   hub,
   feeds,

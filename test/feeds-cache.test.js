@@ -54,7 +54,7 @@ test('ifOlderMs skips fresh data', async () => {
 
 test('failed refresh keeps previous data and records error', async () => {
   let fail = false;
-  const { cache } = mk({ loaders: { google: async () => { if (fail) throw new Error('sin conectores'); return 'viejo'; } } });
+  const { cache, advance } = mk({ loaders: { google: async () => { if (fail) throw new Error('sin conectores'); return 'viejo'; } } });
   await cache.refresh('google');
   fail = true;
   await cache.refresh('google'); // no rechaza
@@ -63,6 +63,7 @@ test('failed refresh keeps previous data and records error', async () => {
   assert.equal(g.error, 'sin conectores');
   assert.equal(g.refreshing, false);
   fail = false;
+  advance(121e3); // pasada la espera después del error
   await cache.refresh('google');
   assert.equal(cache.snapshot().google.error, null); // un refresco bueno limpia el error
 });
@@ -113,23 +114,71 @@ test('un refresco por escritura durante otro en curso se vuelve a pedir al termi
   assert.equal(cache.snapshot().google.data, 2);
 });
 
-test('watcher fires once after a write turn', () => {
+test('watcher fires once after a write that actually ran', () => {
   let n = 0;
   const w = createFeedWatcher(() => n++);
   w('tool', { app: 'Gmail', action: 'send message' });
+  w('tool_result', { app: 'Gmail', action: 'send message', ok: true });
   w('delta', { text: 'listo' });
   w('done', {});
   w('done', {});
   assert.equal(n, 1);
-  w('tool', { app: 'Gmail', action: 'search threads' });
+  w('tool_result', { app: 'Gmail', action: 'search threads', ok: true });
   w('done', {});
   assert.equal(n, 1);
-  w('tool', { app: 'búsqueda web', action: '' });
+  w('tool_result', { app: 'búsqueda web', action: '', ok: true });
   w('done', {});
   assert.equal(n, 1);
-  w('tool', { app: 'Google Calendar', action: 'create event' });
+  w('tool_result', { app: 'Google Calendar', action: 'create event', ok: true });
   w('error', { message: 'x' });
   assert.equal(n, 2);
+});
+
+test('watcher no dispara si la escritura se denegó o no corrió', () => {
+  let n = 0;
+  const w = createFeedWatcher(() => n++);
+  w('tool', { app: 'Gmail', action: 'send message' }); // empezó…
+  w('confirm', { id: 'c1', app: 'Gmail', action: 'send message' });
+  w('confirm_closed', { id: 'c1', allowed: false });
+  w('tool_result', { app: 'Gmail', action: 'send message', ok: false }); // …y se denegó
+  w('done', {});
+  w('tool', { app: 'Gmail', action: 'trash thread' }); // sin resultado (turno cortado)
+  w('done', { interrupted: true });
+  assert.equal(n, 0);
+});
+
+test('watcher no dispara sin navegador conectado', () => {
+  let n = 0;
+  let client = false;
+  const w = createFeedWatcher(() => n++, { hasClient: () => client });
+  w('tool_result', { app: 'Gmail', action: 'send message', ok: true });
+  w('done', {});
+  assert.equal(n, 0);
+  client = true;
+  w('tool_result', { app: 'Gmail', action: 'send message', ok: true });
+  w('done', {});
+  assert.equal(n, 1);
+});
+
+test('después de un error, los refrescos de rutina esperan 2 minutos; los de escritura no', async () => {
+  let calls = 0;
+  let fail = true;
+  const { cache, advance } = mk({ loaders: { google: async () => { calls++; if (fail) throw new Error('caído'); return 'ok'; } } });
+  await cache.refresh('google');
+  assert.equal(calls, 1);
+  assert.equal(typeof cache.snapshot().google.lastErrorAt, 'number');
+  advance(60e3);
+  await cache.refresh('google');                       // al conectar, foco o intervalo: espera
+  await cache.refresh('google', { ifOlderMs: 60000 });
+  await cache.refreshAll();
+  assert.equal(calls, 1);
+  await cache.refresh('google', { reason: 'write' });  // una escritura de JARVIS: va igual
+  assert.equal(calls, 2);
+  advance(121e3);
+  fail = false;
+  await cache.refresh('google');
+  assert.equal(calls, 3);
+  assert.equal(cache.snapshot().google.error, null);
 });
 
 test('READ_ACTIONS tiene las lecturas con espacios, como describeTool', () => {

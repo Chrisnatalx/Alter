@@ -73,7 +73,7 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - `createTimingLog({ file, appendFile = fs.appendFile, mkdirSync = fs.mkdirSync }) -> { write(record: object): void }`.
   - `sanitizeVoiceRecord(payload: object) -> object | null`.
 
-- [ ] **Step 1: Escribir las pruebas que fallan** en `test/timing.test.js`:
+- [x] **Step 1: Escribir las pruebas que fallan** en `test/timing.test.js`:
   - `trackMessage marca init, primer texto y fin`: con `system/init` en 1100, un `text_delta` del orquestador en 1500, otro en 1600 y `result` `success` en 2000, todo con `receivedAt` en 1000, el resultado es `{ initMs: 100, firstTextMs: 500, doneMs: 1000, interrupted: false, tools: [] }`.
   - `un delta de subagente no cuenta como primer texto`: con `parent_tool_use_id: 'x'`, `firstTextMs` queda en `null`.
   - `herramientas: inicio por content_block_start, fin por tool_result`: con `content_block_start` `{ type:'tool_use', id:'tu1', name:'Agent' }` en 1200, un mensaje `assistant` con el bloque `tool_use` `{ id:'tu1', name:'Agent', input:{ subagent_type:'agenda' } }` y un `user` (`parent_tool_use_id: null`) con `{ type:'tool_result', tool_use_id:'tu1' }` en 1900, el resultado es `tools: [{ name:'Agent', agent:'agenda', startMs:200, endMs:900 }]`.
@@ -82,13 +82,13 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - `createTimingLog con file vacío no escribe` y `createTimingLog no lanza si appendFile falla`: el callback recibe un error y solo se avisa una vez con `console.warn`.
   - `sanitizeVoiceRecord deja solo claves conocidas`: acepta `turn`, `speechEnd`, `final`, `post`, `firstQueued`, `speechStart`, `endToFinalMs`, `finalToPostMs`, `postToSpeechStartMs`, `speechEndToSpeechStartMs`, si son números finitos o `null`, y `listenMode`, si es un string de hasta 20 caracteres. Descarta cualquier otra clave. Con algo que no es un objeto, devuelve `null`.
 
-- [ ] **Step 2: Correr y ver que fallan.** `node --test test/timing.test.js`. Esperado: FAIL con `Cannot find module '../src/timing'`.
+- [x] **Step 2: Correr y ver que fallan.** `node --test test/timing.test.js`. Esperado: FAIL con `Cannot find module '../src/timing'`.
 
-- [ ] **Step 3: Implementar `src/timing.js`.** El encabezado y los comentarios van en español. `trackMessage` ignora todo `stream_event` con `parent_tool_use_id != null`. Un `tool_result` sin `tool_use_id` conocido se ignora. `createTimingLog` crea el directorio la primera vez que escribe.
+- [x] **Step 3: Implementar `src/timing.js`.** El encabezado y los comentarios van en español. `trackMessage` ignora todo `stream_event` con `parent_tool_use_id != null`. Un `tool_result` sin `tool_use_id` conocido se ignora. `createTimingLog` crea el directorio la primera vez que escribe.
 
-- [ ] **Step 4: Correr y ver que pasan.** `node --test test/timing.test.js`. Esperado: PASS.
+- [x] **Step 4: Correr y ver que pasan.** `node --test test/timing.test.js`. Esperado: PASS.
 
-- [ ] **Step 5: Commit.** `git add src/timing.js test/timing.test.js && git commit -m "Tiempos por etapa del servidor"`
+- [x] **Step 5: Commit.** `git add src/timing.js test/timing.test.js && git commit -m "Tiempos por etapa del servidor"`
 
 ### Task 2: Tiempos en la sesión, en el canal de eventos y en el registro local
 

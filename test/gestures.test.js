@@ -114,8 +114,24 @@ test('cooldown blocks a second swipe', () => {
   assert.deepEqual(swipes(twoSwipes(900)).map((e) => e.dir), ['left', 'right']);
 });
 
+// La mano en pose de pellizco (ratio 0.8) hasta quedar estable: el pellizco arranca en t = 231
+const P = (ratio) => ({ pose: 'pinch', ratio });
+const steady = () => hold(0, 231, 0.5, 0.5, P(0.8));
+const T0 = 264; // primer cuadro después de estabilizar
+const ratiosFrom = (t0, ratios) => ratios.map((r, i) => [t0 + i * 33, handAt(0.5, 0.5, P(r))]);
+
+test('el pellizco espera a que la mano esté estable', () => {
+  const evs = feed(createGestureTracker(), [...steady(), ...ratiosFrom(T0, [1.2])]);
+  const pinchy = evs.filter((e) => ['pinch-start', 'zoom', 'grab', 'drag'].includes(e.type));
+  assert.ok(pinchy.every((e) => e.t >= 200), JSON.stringify(pinchy.map((e) => e.t)));
+  assert.deepEqual(evs.filter((e) => e.type === 'pinch-start').map((e) => e.t), [231]);
+  // Una mano que entra ya pellizcando y se va enseguida no toca el núcleo
+  const quick = feed(createGestureTracker(), [...hold(0, 132, 0.5, 0.5, P(0.3)), [165, null], [200, null], [233, null], [266, null]]);
+  assert.deepEqual(quick.filter((e) => ['pinch-start', 'zoom', 'grab', 'release'].includes(e.type)), []);
+});
+
 test('pinch zooms continuously', () => {
-  const evs = feed(createGestureTracker(), [...hold(0, 100, 0.5, 0.5, { pose: 'pinch', ratio: 0.8 }), ...hold(133, 200, 0.5, 0.5, { pose: 'pinch', ratio: 1.2 })]);
+  const evs = feed(createGestureTracker(), [...steady(), ...hold(T0, 330, 0.5, 0.5, P(1.2))]);
   assert.equal(evs.filter((e) => e.type === 'pinch-start').length, 1);
   const zooms = evs.filter((e) => e.type === 'zoom');
   assert.ok(Math.abs(zooms.at(-1).zoom - 1.5) <= 0.05, String(zooms.at(-1).zoom));
@@ -123,36 +139,56 @@ test('pinch zooms continuously', () => {
 });
 
 test('zoom respeta los límites', () => {
-  const evs = feed(createGestureTracker(), [[0, handAt(0.5, 0.5, { pose: 'pinch', ratio: 0.5 })], [33, handAt(0.5, 0.5, { pose: 'pinch', ratio: 3 })]]);
+  const evs = feed(createGestureTracker(), [...hold(0, 231, 0.5, 0.5, P(0.5)), ...ratiosFrom(T0, [3])]);
   assert.equal(evs.filter((e) => e.type === 'zoom').at(-1).zoom, DEFAULTS.zoomMax);
 });
 
 test('grab uses hysteresis', () => {
-  const ratios = [0.8, 0.24, 0.30, 0.36, 0.24];
-  const evs = feed(createGestureTracker(), ratios.map((ratio, i) => [i * 33, handAt(0.5, 0.5, { pose: 'pinch', ratio })]));
+  const evs = feed(createGestureTracker(), [...steady(), ...ratiosFrom(T0, [0.24, 0.30, 0.36, 0.24])]);
   const grabs = evs.filter((e) => ['grab', 'ungrab', 'release'].includes(e.type));
   assert.deepEqual(grabs.map((e) => e.type), ['grab', 'ungrab', 'grab']);
-  assert.deepEqual(evs.filter((e) => e.t === 66).map((e) => e.type), ['drag']); // en 0.30 sigue agarrado: solo arrastra
+  assert.deepEqual(evs.filter((e) => e.t === T0 + 33).map((e) => e.type), ['drag']); // en 0.30 sigue agarrado: solo arrastra
+});
+
+test('después de soltar el agarre el zoom sigue desde donde estaba', () => {
+  // 0.8 → 0.6 (zoom 0.75) → 0.24 agarra (zoom quieto) → 0.4 suelta: sigue en 0.75, no salta a 0.5 → 0.5 da 0.9375
+  const evs = feed(createGestureTracker(), [...steady(), ...ratiosFrom(T0, [0.6, 0.24, 0.4, 0.5])]);
+  const zoomAt = (t) => evs.find((e) => e.type === 'zoom' && e.t === t)?.zoom;
+  assert.ok(Math.abs(zoomAt(T0) - 0.75) < 1e-9);
+  assert.equal(zoomAt(T0 + 33), undefined); // agarrado: sin zoom
+  assert.ok(Math.abs(zoomAt(T0 + 66) - 0.75) < 1e-9, String(zoomAt(T0 + 66)));
+  assert.ok(Math.abs(zoomAt(T0 + 99) - 0.9375) < 1e-9, String(zoomAt(T0 + 99)));
 });
 
 test('drag reports offset from grab point', () => {
-  const pinch = { pose: 'pinch', ratio: 0.2 };
-  const evs = feed(createGestureTracker(), [[0, handAt(0.5, 0.5, { pose: 'pinch', ratio: 0.8 })], [33, handAt(0.5, 0.5, pinch)], ...move(66, 200, [0.5, 0.5], [0.6, 0.45], pinch)]);
+  const evs = feed(createGestureTracker(), [...steady(), [T0, handAt(0.5, 0.5, P(0.2))], ...move(T0 + 33, 200, [0.5, 0.5], [0.6, 0.45], P(0.2))]);
   const last = evs.filter((e) => e.type === 'drag').at(-1);
   assert.ok(Math.abs(last.dx - 0.1) < 1e-6, String(last.dx));
   assert.ok(Math.abs(last.dy + 0.05) < 1e-6, String(last.dy));
 });
 
 test('release on pose exit or hand loss', () => {
-  const pinch = { pose: 'pinch', ratio: 0.8 };
-  const a = feed(createGestureTracker(), [[0, handAt(0.5, 0.5, pinch)], [33, handAt(0.5, 0.5, pinch)], [66, handAt(0.5, 0.5)]]);
-  assert.deepEqual(a.filter((e) => e.type === 'release').map((e) => e.t), [66]);
-  const b = feed(createGestureTracker(), [[0, handAt(0.5, 0.5, pinch)], [33, null], [66, null], [99, null], [133, null], [166, null]]);
+  const a = feed(createGestureTracker(), [...steady(), [T0, handAt(0.5, 0.5)]]);
+  assert.deepEqual(a.filter((e) => e.type === 'release').map((e) => e.t), [T0]);
+  const b = feed(createGestureTracker(), [...steady(), [T0, null], [T0 + 33, null], [T0 + 66, null], [T0 + 99, null], [T0 + 133, null]]);
   assert.equal(b.filter((e) => e.type === 'release').length, 1);
-  assert.ok(b.find((e) => e.type === 'release').t > 33 + DEFAULTS.lostGraceMs - 33);
+  assert.ok(b.find((e) => e.type === 'release').t > 231 + DEFAULTS.lostGraceMs);
   // Un cuadro perdido suelto no suelta nada
-  const c = feed(createGestureTracker(), [[0, handAt(0.5, 0.5, pinch)], [33, null], [66, handAt(0.5, 0.5, pinch)]]);
+  const c = feed(createGestureTracker(), [...steady(), [T0, null], [T0 + 33, handAt(0.5, 0.5, P(0.8))]]);
   assert.equal(c.filter((e) => e.type === 'release').length, 0);
+});
+
+test('después de soltar un pellizco los giros esperan a que la mano se estabilice', () => {
+  const run = (gap) => {
+    const tr = createGestureTracker();
+    const rel = 300 + 99; // se suelta el pellizco en este cuadro
+    return feed(tr, [
+      ...hold(0, 300, 0.8, 0.5), ...hold(333, 366, 0.8, 0.5, P(0.8)), [rel, handAt(0.8, 0.5)],
+      ...hold(rel + 33, rel + gap, 0.8, 0.5), ...move(rel + gap + 33, 200, [0.8, 0.5], [0.35, 0.5]), ...hold(rel + gap + 266, rel + gap + 900, 0.35, 0.5),
+    ]);
+  };
+  assert.deepEqual(swipes(run(33)), []);                      // gira enseguida de soltar: no cuenta
+  assert.deepEqual(swipes(run(300)).map((e) => e.dir), ['left']); // con la mano quieta un rato, sí
 });
 
 test('no swipe during pinch', () => {

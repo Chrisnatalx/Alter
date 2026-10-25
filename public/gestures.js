@@ -55,10 +55,11 @@
     let stable = false;      // presente sin cortes por stableMs: recién ahí su movimiento cuenta
     let history = [];        // [{ t, x, y }] del centro de la palma, dentro de la ventana
     let cooldownUntil = 0;
-    let pinch = null;        // { ratio0, grabbed, grabPoint }
+    let swipeReadyAt = 0;    // desde cuándo cuenta el movimiento para girar (al estabilizarse y después de un pellizco)
+    let pinch = null;        // { ratio0, grabbed, grabPoint, zoom }
 
     function reset() {
-      presentSince = null; lastSeen = null; stable = false; history = []; cooldownUntil = 0; pinch = null;
+      presentSince = null; lastSeen = null; stable = false; history = []; cooldownUntil = 0; swipeReadyAt = 0; pinch = null;
     }
 
     function lose(events) {
@@ -71,7 +72,7 @@
     function updatePinch(lm, events) {
       const ratio = pinchRatio(lm);
       if (!pinch) {
-        pinch = { ratio0: ratio, grabbed: false, grabPoint: null };
+        pinch = { ratio0: ratio, grabbed: false, grabPoint: null, zoom: 1 };
         events.push({ type: 'pinch-start' });
         history = [];
       }
@@ -82,17 +83,22 @@
         events.push({ type: 'grab' });
       } else if (pinch.grabbed && ratio > o.grabOut) {
         pinch.grabbed = false;
+        pinch.ratio0 = ratio / pinch.zoom; // el zoom sigue desde donde quedó, sin saltar
         events.push({ type: 'ungrab' });
       }
       if (pinch.grabbed) events.push({ type: 'drag', dx: point.x - pinch.grabPoint.x, dy: point.y - pinch.grabPoint.y });
-      else events.push({ type: 'zoom', zoom: clamp(ratio / pinch.ratio0, o.zoomMin, o.zoomMax) });
+      else {
+        pinch.zoom = clamp(ratio / pinch.ratio0, o.zoomMin, o.zoomMax);
+        events.push({ type: 'zoom', zoom: pinch.zoom });
+      }
     }
 
     // Giro: recorrido largo, en poco tiempo y casi sin desvío en el otro eje. Compara con la muestra
     // más vieja de la ventana: un vaivén lento o un movimiento corto no llegan.
     function updateSwipe(t, lm, events) {
       const c = palmCenter(lm);
-      if (t < cooldownUntil) { history = [{ t, ...c }]; return; } // lo que se mueve en el enfriamiento no cuenta
+      // Lo que se mueve en el enfriamiento, o antes de que la mano se estabilice, no cuenta
+      if (t < cooldownUntil || t < swipeReadyAt) { history = [{ t, ...c }]; return; }
       history.push({ t, ...c });
       while (history.length && history[0].t < t - o.swipeWindowMs) history.shift();
       const dx = c.x - history[0].x;
@@ -119,8 +125,13 @@
         history = []; // el movimiento de la mano que entra al cuadro no es un gesto
         events.push({ type: 'hand', present: true });
       }
-      if (isPinchPose(hand)) { updatePinch(hand, events); return events; } // mientras dura el pellizco no hay giros
-      if (pinch) { events.push({ type: 'release' }); pinch = null; history = []; }
+      // Pellizco: recién con la mano estable (una mano que entra no toca el núcleo); mientras dura, no hay giros
+      if (isPinchPose(hand)) { if (stable) updatePinch(hand, events); return events; }
+      if (pinch) {
+        events.push({ type: 'release' });
+        pinch = null; history = [];
+        swipeReadyAt = t + o.stableMs; // la mano que suelta suele moverse: se espera a que se asiente
+      }
       if (stable) updateSwipe(t, hand, events);
       return events;
     }

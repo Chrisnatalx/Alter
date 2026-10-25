@@ -206,7 +206,7 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - `node scripts/medir.js --comparar logs/medicion-a.json logs/medicion-b.json …`
   - `node scripts/medir.js --voz logs/tiempos.jsonl`
 
-- [ ] **Step 1: Escribir las pruebas que fallan** en `test/medir.test.js`:
+- [x] **Step 1: Escribir las pruebas que fallan** en `test/medir.test.js`:
   - `median con pares, impares y nulls`: `median([3,1,2]) === 2`, `median([4,1,null,3,2]) === 2.5`, `median([]) === null`.
   - `SENTENCE_RE es la misma que usa flushSentences`: lee `public/app.js`, extrae la regex que está dentro de `flushSentences` y compara su `source` con `SENTENCE_RE.source`.
   - `hasFirstSentence`: `'Hola'` da `false`, `'Hola, ¿qué tal? '` da `true` y `'.'` da `false`.
@@ -216,9 +216,9 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - `summarizeRuns separa el arranque en frío`: con un registro `cold: true` de 9000 ms y dos tibios de 1000 y 1200, el resultado es `byRequest.saludo.firstSentenceMs === 1100` y `cold.firstSentenceMs === 9000`.
   - `compareResults marca mejora de 300 ms o más`: una base de 2000 contra una variante de 1650 lleva la marca. Contra una de 1800 no la lleva.
 
-- [ ] **Step 2: Correr y ver que fallan.** `node --test test/medir.test.js`. Esperado: FAIL con «Cannot find module».
+- [x] **Step 2: Correr y ver que fallan.** `node --test test/medir.test.js`. Esperado: FAIL con «Cannot find module».
 
-- [ ] **Step 3: Implementar `medir-lib.js` y `medir.js`.** `medir.js` hace esto:
+- [x] **Step 3: Implementar `medir-lib.js` y `medir.js`.** `medir.js` hace esto:
   1. Revisa `checkEnv` y avisa que el guion consume cupo y puede abrir pestañas, como `e2e.sh`.
   2. Levanta `node server.js` con `JARVIS_PORT=${MEDIR_PORT || 7789}` y el entorno que recibió, y saca el token de la página igual que `e2e.sh`.
   3. Abre `/api/events` con `fetch` en streaming.
@@ -230,9 +230,9 @@ Inferido (lo comprueba la tarea 6, paso 1):
   9. Al salir mata el servidor, también si algo falló.
   - README: cómo se usa, cuánto cupo consume (12 turnos por configuración) y que los resultados tienen texto real de mails (por eso `logs/` no se sube).
 
-- [ ] **Step 4: Correr las pruebas.** `npm test`. Esperado: PASS.
+- [x] **Step 4: Correr las pruebas.** `npm test`. Esperado: PASS.
 
-- [ ] **Step 5: Commit.** `git add scripts/medir-lib.js scripts/medir.js test/medir.test.js README.md && git commit -m "Guion de medición por HTTP con medianas y comparación"`
+- [x] **Step 5: Commit.** `git add scripts/medir-lib.js scripts/medir.js test/medir.test.js README.md && git commit -m "Guion de medición por HTTP con medianas y comparación"`
 
 ## Fase C: medición base (parada obligatoria)
 

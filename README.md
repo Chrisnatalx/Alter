@@ -108,6 +108,20 @@ Hay tres tipos de registro (campo `tipo`):
   - `turn` (número de turno de la sesión), `model` y `flags` (las variantes experimentales activas).
 - **`voz`**, uno por turno, lo manda la interfaz (`POST /api/timing`). Los valores son de `performance.now()` en la página: `speechEnd` (último resultado del reconocedor), `final` (frase cerrada), `post` (mensaje enviado), `firstQueued` (primera frase entregada a la voz) y `speechStart` (empezó a sonar), más las diferencias `endToFinalMs`, `finalToPostMs`, `postToSpeechStartMs` y `speechEndToSpeechStartMs`. Con la voz silenciada, `speechStart` queda en `null`.
 
+En la interfaz, la fila **VOZ** de la telemetría muestra el tiempo desde que dejaste de hablar hasta que JARVIS empezó a sonar (o desde el envío, si escribiste), y al pasar el mouse muestra el desglose por etapa.
+
+### Medir tiempos
+`scripts/medir.js` compara configuraciones con un set fijo de cuatro pedidos (un saludo, «qué tengo hoy», «leé mi último mail» y una búsqueda web). Levanta su propio servidor (puerto 7789, o `MEDIR_PORT`), manda los cuatro pedidos 3 veces (o `MEDIR_RUNS`) en una sola sesión, rechaza toda confirmación y corta con código 2 si el servidor llegara a permitir un envío. El primer pedido incluye crear la sesión y se reporta aparte como arranque en frío.
+```
+MEDIR_CONFIG=base JARVIS_MODEL=<modelo> node scripts/medir.js
+node scripts/medir.js --comparar logs/medicion-base-….json logs/medicion-otra-….json
+node scripts/medir.js --voz logs/tiempos.jsonl
+```
+- `MEDIR_CONFIG` es la etiqueta de la corrida y `JARVIS_MODEL` es obligatorio: en cada comparación el modelo se fija a mano.
+- **Consume cupo**: 12 turnos por configuración (más los turnos que arranquen las tareas en segundo plano) y puede abrir pestañas del navegador.
+- Deja `logs/medicion-<config>-<fecha>.json` con cada pedido (tiempos y texto completo de la respuesta) y las medianas, y el log del servidor en `logs/medir-servidor-….log`. **Los resultados tienen texto real de tus mails y tu calendario**: por eso `logs/` no se sube.
+- `--comparar` arma una tabla con la mediana del tiempo hasta la primera frase por pedido (el primer archivo es la base) y marca `✔ ≥300 ms` si la mejora global llega a ese umbral. `--voz` resume los registros de voz por modo de escucha.
+
 ## Subagentes y tareas en segundo plano
 JARVIS puede delegar trabajo en subagentes (definidos en `src/agents/`). Los tres son de solo lectura o de preparación: **no envían ni borran nada**. Lo que envía o borra lo hace JARVIS mismo, y pide tu confirmación.
 
@@ -145,7 +159,8 @@ src/
   events.js          canal de eventos (SSE) hacia la interfaz
   agents/            subagentes (agenda, correo, investigador) y su registro en index.js
   tools/             herramientas propias (navegador, YouTube); se registran en index.js
-scripts/             e2e.sh: prueba de punta a punta (consume cupo)
+  timing.js          tiempos por etapa de cada turno y registro local (logs/tiempos.jsonl)
+scripts/             e2e.sh: prueba de punta a punta; medir.js: comparación de tiempos (los dos consumen cupo)
 test/                pruebas (npm test)
 public/              interfaz web
 ```

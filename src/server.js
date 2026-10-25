@@ -134,13 +134,14 @@ async function handleFeedsRefresh(req, res, deps) {
   res.writeHead(202).end();
 }
 
-// POST /api/message { text, sessionId? } → 202. La respuesta llega por el canal de eventos.
+// POST /api/message { text, sessionId?, view? } → 202. La respuesta llega por el canal de eventos.
+// `view` es la cara del carrusel abierta: la sesión la agrega como contexto (prompt.js, viewLine).
 async function handleMessage(req, res, deps) {
   const payload = await readJson(req);
   const text = String(payload.text || '').trim();
   if (!text) { res.writeHead(400).end(); return; }
   const session = await ensureSession(stateOf(deps), deps, payload.sessionId);
-  session.send(text);
+  session.send(text, payload.view);
   res.writeHead(202).end();
 }
 

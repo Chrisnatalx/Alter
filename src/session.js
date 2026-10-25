@@ -4,7 +4,7 @@
 const { buildAgentOptions } = require('./agent-options');
 const { createPermissionGate, describeTool } = require('./permissions');
 const { createJarvisTools } = require('./tools');
-const { nowLine } = require('./prompt');
+const { nowLine, viewLine } = require('./prompt');
 const crypto = require('crypto');
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -137,9 +137,11 @@ class Session {
     this.gate.denyAll();
   }
 
-  send(text) {
+  // `view`: la cara del carrusel que mira la persona (opcional); va como contexto después de la fecha
+  send(text, view) {
     this.state.userSince = true;
-    const uuid = this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${text}`);
+    const vl = viewLine(view);
+    const uuid = this.queue.push(`[Fecha y hora actual: ${nowLine(this.config.timezone)}]\n${vl ? vl + '\n' : ''}${text}`);
     if (uuid) this.pushed.push(uuid);
     return uuid;
   }

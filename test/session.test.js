@@ -122,6 +122,16 @@ test('send antes de que arranque la query no se pierde y lleva la fecha', async 
   s.close();
 });
 
+test('send con una vista abierta agrega la línea de la vista después de la fecha', async () => {
+  const { queryFn, calls } = fakeQuery();
+  const s = new Session({ config, emit: () => {}, sdk: fakeSdk, queryFn });
+  s.send('respondé el segundo', { face: 'mail', threads: [{ id: 't1', from: 'Ana', subject: 'Hola', unread: true }, { id: 't2', from: 'Beto', subject: 'Factura', unread: false }] });
+  s.start({});
+  const first = (await calls.args.prompt[Symbol.asyncIterator]().next()).value;
+  assert.match(first.message.content, /^\[Fecha y hora actual: .+\]\n\[Vista en pantalla: Mail;.+\]\nrespondé el segundo$/);
+  s.close();
+});
+
 test('start: resume solo con UUID válido y sin abortController', () => {
   const uuid = '123e4567-e89b-12d3-a456-426614174000';
   const a = fakeQuery();

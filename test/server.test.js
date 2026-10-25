@@ -49,7 +49,7 @@ function fakeSession(over = {}) {
   const calls = { send: [], close: 0, interrupt: 0, stop: [], confirm: [] };
   return {
     calls, closed: false, sessionId: 'sid-1', model: 'haiku', tasks: [{ id: 't1' }],
-    send: (t) => calls.send.push(t),
+    send: (t, v) => calls.send.push([t, v]),
     close() { calls.close++; },
     interrupt: async () => { calls.interrupt++; },
     stopTask: async (id) => { calls.stop.push(id); },
@@ -100,7 +100,7 @@ test('POST /api/message crea la sesión una vez, la reutiliza y responde 202', a
   const b = await call(deps, 'POST', '/api/message', { text: 'otra' });
   assert.equal(a.status, 202);
   assert.equal(b.status, 202);
-  assert.deepEqual(s.calls.send, ['hola', 'otra']);
+  assert.deepEqual(s.calls.send, [['hola', undefined], ['otra', undefined]]);
   assert.deepEqual(deps.created, [uuid]);
 });
 
@@ -111,7 +111,14 @@ test('una sesión cerrada se reemplaza en el siguiente mensaje', async () => {
   await call(deps, 'POST', '/api/message', { text: 'uno' });
   deps.sessionFactory = async () => fresh;
   await call(deps, 'POST', '/api/message', { text: 'dos' });
-  assert.deepEqual(fresh.calls.send, ['dos']);
+  assert.deepEqual(fresh.calls.send, [['dos', undefined]]);
+});
+
+test('POST /api/message pasa la vista que mira la persona', async () => {
+  const s = fakeSession();
+  const deps = mkDeps(s);
+  await call(deps, 'POST', '/api/message', { text: 'hola', view: { face: 'weather' } });
+  assert.deepEqual(s.calls.send, [['hola', { face: 'weather' }]]);
 });
 
 test('POST /api/new con tareas corriendo da 409 y {running}', async () => {

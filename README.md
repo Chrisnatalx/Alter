@@ -30,6 +30,8 @@ npm link
 ```
 `npm link` registra el comando global `jarvis`. Si después movés la carpeta, volvé a correr `npm link` adentro.
 
+`npm install` también baja el modelo de manos de MediaPipe (~7,8 MB) a `vendor/` y comprueba su huella. Si no había red, avisa y sigue: los gestos quedan apagados hasta que corras `npm run modelo`.
+
 ### 5. Tu configuración (opcional)
 Copiá `.env.example` como `.env` y completá lo que necesites. Las variables están explicadas en [Configuración](#configuración). Lo más común es esto:
 ```
@@ -40,7 +42,7 @@ JARVIS_GOOGLE_ACCOUNT=tu-mail@ejemplo.com
 `JARVIS_USER_NAME` es cómo te llama JARVIS y `JARVIS_TIMEZONE` define su fecha y hora (si la omitís usa la de tu sistema). `JARVIS_GOOGLE_ACCOUNT` sirve si tenés varias cuentas de Google en el navegador, para que Calendar y Gmail se abran en la correcta. El `.env` es tuyo y no se sube al repo.
 
 ### 6. Arrancar
-Corré `jarvis`, permití el micrófono cuando el navegador lo pida y hablale.
+Corré `jarvis`, permití el micrófono y la cámara cuando el navegador lo pida y hablale. La cámara es para los [gestos con la mano](#gestos-con-la-mano); si no la querés, negá el permiso o tocá **C**.
 
 ## Uso
 En cualquier terminal:
@@ -80,6 +82,40 @@ JARVIS puede abrir páginas en una pestaña nueva de tu navegador por defecto (h
 
 De las herramientas internas de Claude Code solo están habilitadas las de web (sin terminal ni archivos). Los hooks y la memoria de archivos de Claude Code están desactivados en JARVIS.
 
+## Gestos con la mano
+Con la cámara prendida, JARVIS sigue tu mano en el navegador con MediaPipe (`HandLandmarker`). **El video no se muestra en pantalla y no sale de tu máquina**: MediaPipe, sus archivos `.wasm` y el modelo se sirven desde el propio servidor local, sin CDN. MediaPipe trae un cliente de estadísticas que intenta mandar datos de uso a Google (`odml.pa.googleapis.com`): la página se sirve con la política `connect-src 'self'`, que lo bloquea (en la consola del navegador vas a ver el aviso del bloqueo).
+
+| Gesto | Qué hace |
+|---|---|
+| **Pellizco** (pulgar e índice estirados, el resto de los dedos recogidos), abrir y cerrar los dedos | Agranda o achica el núcleo, como el zoom del celular |
+| **Juntar** pulgar e índice del todo y mover la mano | Agarra el núcleo y lo arrastra |
+| **Soltar** (abrir la mano o sacarla del cuadro) | El núcleo vuelve solo a su lugar y a su tamaño |
+| Mano **de derecha a izquierda**, rápido | Gira el carrusel a la vista siguiente: Núcleo → Calendar → Mail → Núcleo |
+| Mano **de izquierda a derecha**, rápido | Vuelve una vista atrás |
+| Mano **hacia arriba**, rápido | Muestra el Clima |
+| Mano **hacia abajo**, rápido (desde el Clima) | Vuelve a la vista de antes |
+
+Las direcciones son las tuyas: si movés la mano hacia tu izquierda, la pantalla gira hacia tu izquierda. **Gesticular mientras hablás no cuenta**: solo dispara un movimiento brusco y largo (más de un tercio del cuadro en menos de 300 ms, casi sin desvío), con la mano estable en el cuadro y fuera de un pellizco, y después de un giro hay casi un segundo de espera. El pellizco solo actúa sobre el Núcleo.
+
+- **C** o el botón **CÁMARA**: prende/apaga la cámara (se apaga la luz). La preferencia se guarda en el navegador.
+- **Flechas del teclado** (← → ↑ ↓): lo mismo que los giros, sin cámara.
+- Abajo a la izquierda se ve el estado: `MANO DETECTADA`, `SIN MANO`, `CÁMARA APAGADA` o `GESTOS NO DISPONIBLES: …` con el motivo (sin permiso de cámara, falta el modelo, etc.). La voz y el teclado andan igual.
+- **Faltan los gestos** («corré npm run modelo»): `npm run modelo` vuelve a bajar el modelo.
+- Con `?debug` en la dirección, la consola muestra cada 5 s cuánto tarda la detección, y la `x` de tu palma: al mover la mano hacia tu izquierda tiene que bajar. Si sube, tu webcam ya viene espejada (avisá: hay que sacar el `unmirror` en `public/hands.js`).
+- Con poca luz el seguimiento empeora: el indicador ayuda a ver qué pasa. La detección corre a 15 cuadros por segundo para no frenar el núcleo de partículas.
+
+## Vistas
+El carrusel tiene tres caras en un anillo (**Núcleo**, **Calendar** y **Mail**) y el **Clima** arriba, fuera del anillo. Los puntitos de abajo marcan en qué cara estás. Con una vista abierta el núcleo queda chiquito en la esquina, cambia de color como el grande (escuchando, pensando, hablando) y tocarlo hace lo mismo de siempre.
+
+- **Calendar**: la semana entera, de lunes a domingo, con los eventos de todos tus calendarios visibles. Los de día completo van arriba y los que rechazaste no aparecen. Hoy queda marcado.
+- **Mail**: los últimos 8 hilos de la bandeja de entrada, numerados, con los no leídos marcados.
+- **Clima**: Buenos Aires ahora (temperatura, sensación, viento y humedad) y los próximos días, desde [Open-Meteo](https://open-meteo.com) (gratis, sin API key, lo pide el servidor).
+- Cada cara dice cuándo se actualizó, o el error si no hay datos.
+
+**Se le puede hablar desde cualquier vista**, y JARVIS sabe cuál estás mirando: en Mail, «¿de qué trata el segundo?» o «respondé el segundo» se refieren al segundo hilo de la lista que ves (va con su id, así no se confunde aunque llegue un mail nuevo). Mientras Mail está abierta la lista no cambia sola; se actualiza al volver a entrar, o enseguida si JARVIS respondió, archivó o borró algo. Las confirmaciones de envío y borrado son las de siempre.
+
+**Girar es instantáneo y no gasta un turno**: los datos ya están guardados en el servidor. Calendar y Gmail se traen con una consulta aparte de la conversación (`src/feeds/google.js`): modelo `haiku`, sin el prompt de JARVIS, **solo tres herramientas de lectura** (`list_calendars`, `list_events` y `search_threads`; todas las demás quedan fuera de su alcance) y respuesta en JSON validado. **Consume cupo de tu cuenta**: medido, unos US$0,006 a US$0,008 por refresco a precio de lista, y unos 20 a 25 segundos en segundo plano. Corre solo mientras haya una ventana de JARVIS abierta: al abrirla (si los datos tienen más de un minuto), cada 10 minutos, al volver a la pestaña (si tienen más de 5) y después de que JARVIS escriba algo en Gmail o Calendar. El modelo se cambia con `JARVIS_FEED_MODEL`.
+
 ## Configuración
 Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que necesites (también las API keys que se sumen). `.env` no se sube al repo. Una variable definida en la terminal tiene prioridad sobre el archivo.
 
@@ -90,6 +126,7 @@ Copiá `.env.example` como `.env` en la carpeta de JARVIS y completá lo que nec
 | `JARVIS_USER_NAME` | vacío | Tu nombre, para que JARVIS te hable por él (queda solo en tu `.env`) |
 | `JARVIS_TIMEZONE` | zona del sistema | Zona horaria IANA (p. ej. `America/Argentina/Buenos_Aires`) para la fecha y hora que ve JARVIS. Si no es válida, avisa en la consola y usa la del sistema |
 | `JARVIS_GOOGLE_ACCOUNT` | vacío | Mail de la cuenta de Google con la que abrir Calendar, Gmail o Drive si tenés varias en el navegador (agrega `authuser=`) |
+| `JARVIS_FEED_MODEL` | `haiku` | Modelo de la consulta de lectura que trae Calendar y Gmail para las [vistas](#vistas) |
 | `JARVIS_AGENT_<NOMBRE>_MODEL` | `haiku` (agenda), `sonnet` (correo, investigador) | Modelo de cada subagente: `AGENDA`, `CORREO` o `INVESTIGADOR` (ver [Subagentes](#subagentes-y-tareas-en-segundo-plano)) |
 | `CLAUDE_BIN` | autodetectado | Ruta al ejecutable de Claude Code (si no, usa el que trae el SDK) |
 
@@ -112,8 +149,10 @@ Para cambiar el modelo de uno, poné la variable en tu `.env` (por ejemplo `JARV
 
 ## Seguridad y privacidad
 - El servidor solo escucha en `127.0.0.1` y exige un token que se genera en cada arranque y solo conoce la página de JARVIS: otra web abierta en tu navegador no puede mandarle órdenes ni confirmar acciones. Si reiniciás el servidor, recargá la página (F5). La página se reconecta sola si el canal de eventos se corta, salvo que el token ya no valga (ahí pide F5).
-- El canal de eventos (`GET /api/events`) y todas las acciones POST (`/api/message`, `/api/interrupt`, `/api/confirm`, `/api/new`, `/api/tasks/stop`) exigen el mismo token y el mismo host local; solo un cliente está conectado al canal a la vez.
-- Cada mensaje consume de tu cupo de Claude.
+- El canal de eventos (`GET /api/events`), los datos de las vistas (`GET /api/feeds` y `POST /api/feeds/refresh`) y todas las acciones POST (`/api/message`, `/api/interrupt`, `/api/confirm`, `/api/new`, `/api/tasks/stop`) exigen el mismo token y el mismo host local; solo un cliente está conectado al canal a la vez.
+- Cada mensaje consume de tu cupo de Claude, y también el refresco de Calendar y Gmail de las vistas (ver [Vistas](#vistas)).
+- La cámara se procesa en el navegador: el video no se muestra ni sale de tu máquina. La página solo puede conectarse a su propio servidor (`connect-src 'self'`), lo que bloquea la telemetría de MediaPipe.
+- Los asuntos y remitentes de los mails que viajan con tu mensaje (vista de Mail) se aplanan, se recortan y van marcados como datos, no como instrucciones.
 - El reconocimiento de voz del navegador procesa el audio en servidores de Google (Chrome) o Microsoft (Edge).
 - La personalidad se define en `src/prompt.js`.
 
@@ -123,14 +162,22 @@ server.js            punto de entrada (reexporta src/server.js; lo usa bin/jarvi
 src/
   server.js          servidor HTTP: interfaz, canal de eventos (GET /api/events) y acciones POST
   config.js          configuración leída del entorno (.env)
-  prompt.js          prompt de sistema y línea de fecha
+  prompt.js          prompt de sistema, línea de fecha y línea de la vista en pantalla
   permissions.js     qué pide confirmación y la puerta de confirmaciones
   agent-options.js   opciones del Agent SDK compartidas
   session.js         la sesión viva con Claude: cola de entrada, eventos y confirmaciones
   events.js          canal de eventos (SSE) hacia la interfaz
   agents/            subagentes (agenda, correo, investigador) y su registro en index.js
   tools/             herramientas propias (navegador, YouTube); se registran en index.js
-scripts/             e2e.sh: prueba de punta a punta (consume cupo)
+  feeds/             datos de las vistas: weather.js (Open-Meteo), google.js (Calendar y Gmail,
+                     query de solo lectura) y cache.js (caché y refresco en segundo plano)
+scripts/             e2e.sh: prueba de punta a punta (consume cupo); descargar-modelo.js (npm run modelo)
 test/                pruebas (npm test)
 public/              interfaz web
+  app.js             lógica del cliente: voz, conversación, núcleo, cámara y carrusel
+  gestures.js        rastreador de gestos (puro, con tests): giros, pellizco, agarre
+  nav.js             navegación del carrusel y datos de la vista (puro, con tests)
+  hands.js           cámara y MediaPipe HandLandmarker en el navegador
+  faces.js           caras del carrusel: Calendar, Mail y Clima
+vendor/              el modelo de manos (lo baja npm install; no se sube al repo)
 ```

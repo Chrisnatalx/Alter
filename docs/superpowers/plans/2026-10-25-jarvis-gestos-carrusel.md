@@ -543,7 +543,7 @@ Es pegamento del navegador: se verifica a mano.
 **Files:**
 - Modify: `README.md` (secciones «Gestos con la mano» y «Vistas», más Configuración, Seguridad y Estructura), `.env.example` (`JARVIS_FEED_MODEL`)
 
-- [ ] **Step 1: Documentar:**
+- [x] **Step 1: Documentar:**
   - El permiso de cámara: se procesa en el navegador, el video no se muestra ni sale de la máquina y la CSP bloquea la telemetría de MediaPipe.
   - Los gestos (pellizco y zoom, agarrar y arrastrar, giros izquierda y derecha, arriba al Clima, abajo para volver) y que gesticular al hablar no cuenta.
   - Cómo apagar la cámara: el botón o la tecla **C**. Las flechas del teclado.
@@ -556,7 +556,8 @@ Es pegamento del navegador: se verifica a mano.
   - `npm test` en verde.
   - Una sesión real de 10 minutos con la cámara prendida, sin cambios de vista involuntarios y con la voz fluida.
   - Anotar en el PR el costo de un refresco y el CPU (fps del núcleo y ms de detección). Si el costo resulta alto, alargar `feedIntervalMs` antes de mergear (lo dice el spec).
-- [ ] **Step 3: Commit** `git commit -m "README: gestos, vistas y cámara"`
+  *Estado (2026-10-25):* `npm test` en verde (158 tests). Costo medido de un refresco: de US$0,0060 a US$0,0076 a precio de lista, en 5 refrescos reales (tarea 5 y verificaciones de las tareas 10 a 12), de 18 a 26 s. Con eso no hace falta alargar `feedIntervalMs`. En headless, `detectForVideo` tardó de 34 a 52 ms (WebGL por software). **Pendiente, con la persona frente a la cámara:** la sesión de 10 minutos y los fps del núcleo y los ms de detección con la GPU real.
+- [x] **Step 3: Commit** `git commit -m "README: gestos, vistas y cámara"`
 
 ---
 

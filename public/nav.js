@@ -41,5 +41,17 @@
     }
   }
 
-  return { RING, navigate, agoLabel, viewPayload };
+  // La bandeja que se ve en Mail queda congelada mientras la cara está abierta: { inbox, feed } con el feed
+  // de Google del momento (para su «actualizado hace…»).
+  const freezeInbox = (google) => ({ inbox: google?.data?.inbox || [], feed: google || null });
+
+  // Con datos nuevos: se reemplaza si los trajo una escritura de JARVIS (un hilo borrado no puede seguir
+  // siendo «el segundo») o si al congelar todavía no había datos (si no, Mail quedaría vacía hasta salir).
+  function nextFrozen(frozen, google, reason) {
+    if (reason === 'write' || (!frozen?.feed?.data && google?.data)) return freezeInbox(google);
+    if (!frozen?.feed?.data) return { ...frozen, feed: google || frozen?.feed || null }; // sin datos aún: al menos el error
+    return frozen;
+  }
+
+  return { RING, navigate, agoLabel, viewPayload, freezeInbox, nextFrozen };
 });

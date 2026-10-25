@@ -1,6 +1,25 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RING, navigate, agoLabel, viewPayload } = require('../public/nav');
+const { RING, navigate, agoLabel, viewPayload, freezeInbox, nextFrozen } = require('../public/nav');
+
+test('la lista congelada de Mail', () => {
+  const g1 = { data: { inbox: [{ id: 'a' }] }, updatedAt: 1 };
+  const g2 = { data: { inbox: [{ id: 'b' }] }, updatedAt: 2 };
+  const empty = freezeInbox(null); // se abrió Mail antes de que llegaran datos
+  assert.deepEqual(empty.inbox, []);
+  // sin datos al congelar: el primer refresco la reemplaza aunque no sea por escritura
+  assert.deepEqual(nextFrozen(empty, g1, undefined).inbox, [{ id: 'a' }]);
+  // con datos: un refresco común no la toca…
+  const f1 = freezeInbox(g1);
+  assert.equal(nextFrozen(f1, g2, undefined), f1);
+  // …uno por escritura de JARVIS sí
+  assert.deepEqual(nextFrozen(f1, g2, 'write').inbox, [{ id: 'b' }]);
+  // un refresco que falló sin datos deja la lista vacía pero muestra el error
+  const failed = nextFrozen(empty, { data: null, error: 'x' }, undefined);
+  assert.deepEqual(failed.inbox, []);
+  assert.equal(failed.feed.error, 'x');
+  assert.deepEqual(nextFrozen(failed, g1, undefined).inbox, [{ id: 'a' }]); // y el siguiente con datos la llena
+});
 
 const at = (face, from = face) => ({ face, from });
 

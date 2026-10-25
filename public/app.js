@@ -398,7 +398,7 @@
       if (seq !== askSeq) return; // ESC o una pregunta nueva mientras esperaba el corte: este mensaje ya no se manda
       cur = turn; // recién ahora: lo que llegue del turno cortado no se pinta como respuesta nueva
       // Con una vista abierta, JARVIS sabe qué mira la persona («el segundo» es el segundo de la lista visible)
-      const view = viewPayload(app.face, { shownInbox, week: feedCache.google?.data?.week });
+      const view = viewPayload(app.face, { shownInbox: frozen.inbox, week: feedCache.google?.data?.week });
       const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId, ...(view ? { view } : {}) });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok) throw new Error('El servidor respondió ' + res.status);
@@ -1044,13 +1044,12 @@
   // ============================================================
   //  CARRUSEL DE VISTAS (Calendar, Mail y Clima; los datos ya están guardados en el servidor)
   // ============================================================
-  const { RING, navigate, viewPayload } = window.JarvisNav;
+  const { RING, navigate, viewPayload, freezeInbox, nextFrozen } = window.JarvisNav;
   const Faces = window.JarvisFaces;
   app.nav = { face: 'core', from: 'core' };
   let ringTurn = 0;           // vueltas acumuladas: de Mail al Núcleo sigue girando para el mismo lado
   let feedCache = {};         // el último snapshot de /api/feeds: { google, weather }
-  let shownInbox = [];        // la bandeja tal como se ve: congelada mientras Mail está abierta
-  let shownMail = null;       // con qué datos se congeló (para su «actualizado hace…»)
+  let frozen = freezeInbox(null); // la bandeja tal como se ve, congelada mientras Mail está abierta (nav.js)
 
   function setFace(nav) {
     const prev = app.face;
@@ -1061,8 +1060,7 @@
     const idx = RING.indexOf(nav.face === 'weather' ? nav.from : nav.face);
     [...$('face-dots').children].forEach((d, i) => d.classList.toggle('on', i === idx));
     if (nav.face === 'mail' && prev !== 'mail') { // al entrar se congela la lista que se va a ver
-      shownInbox = feedCache.google?.data?.inbox || [];
-      shownMail = feedCache.google;
+      frozen = freezeInbox(feedCache.google);
       renderMail();
     }
   }
@@ -1077,7 +1075,7 @@
 
   // En Mail abierta se pinta la lista congelada; si no, la de la caché (así al girar ya está al día)
   function renderMail() {
-    if (app.face === 'mail') Faces.renderMail($('face-mail'), shownMail, shownInbox);
+    if (app.face === 'mail') Faces.renderMail($('face-mail'), frozen.feed, frozen.inbox);
     else Faces.renderMail($('face-mail'), feedCache.google);
   }
   function renderFaces() {
@@ -1086,14 +1084,11 @@
     renderMail();
   }
 
-  // Llegaron datos nuevos. Si los trajo una escritura de JARVIS (respondió, archivó, borró), también se
-  // actualiza la lista de Mail abierta: un hilo que ya no está no puede seguir siendo «el segundo».
+  // Llegaron datos nuevos. La lista de Mail abierta se actualiza si los trajo una escritura de JARVIS
+  // (un hilo que ya no está no puede seguir siendo «el segundo») o si se congeló sin datos (nextFrozen).
   function applyFeeds(snap) {
     feedCache = snap || {};
-    if (app.face === 'mail' && snap?.reason === 'write') {
-      shownInbox = feedCache.google?.data?.inbox || [];
-      shownMail = feedCache.google;
-    }
+    if (app.face === 'mail') frozen = nextFrozen(frozen, feedCache.google, snap?.reason);
     renderFaces();
   }
 

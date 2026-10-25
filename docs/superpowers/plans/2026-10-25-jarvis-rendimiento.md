@@ -266,8 +266,8 @@ Cambios al plan, en este orden:
   - Implementado con `planRuns` en `medir-lib.js`. Consecuencia: el saludo siempre es el primero, así que solo aparece en la columna «frío» (n=3) y deja de entrar en la mediana global, que pasa a ser agenda, correo y web. `--comparar` suma una columna «frío».
   - La prueba de delegación de 5c va en el mismo guion, con `MEDIR_DELEGACION=1`, al final de la sesión tibia. Registra `delegatedTo`, `background` (`task_started`), `taskTurnDoneMs` (cuándo la interfaz dice el resultado) y los dos textos.
 - **Task 7 (`JARVIS_PROMPT_DIRECT`) en espera:** no se implementa hasta que la persona decida. En la base no hubo delegación en las consultas rápidas.
-- [ ] **5c. Modelo principal Sonnet:** configuración `sonnet` con `JARVIS_MODEL=claude-sonnet-5-5` (12 turnos) contra la base nueva. Además, una prueba de delegación por modelo (Opus y Sonnet) con «investigá a fondo las novedades de Node 24 y avisame»: si delega en `investigador` en segundo plano (`Agent` con ese subagente y `task_started`), cuánto tarda en volver a hablar y el texto de las respuestas para comparar la calidad.
-- [ ] **5d. Candidato nuevo `JARVIS_PROMPT_PREAMBLE=1`** (apagado por defecto): una oración en el prompt para que, antes de llamar a una herramienta, JARVIS diga una frase muy corta y variada (2 a 5 palabras, p. ej. «Ya me fijo.»). Primero la prueba del prompt. Se mide con el modelo por defecto y se verifica en el flujo que la frase llega antes que la herramienta.
+- [x] **5c. Modelo principal Sonnet:** configuración `sonnet` con `JARVIS_MODEL=claude-sonnet-5-5` (12 turnos) contra la base nueva. Además, una prueba de delegación por modelo (Opus y Sonnet) con «investigá a fondo las novedades de Node 24 y avisame»: si delega en `investigador` en segundo plano (`Agent` con ese subagente y `task_started`), cuánto tarda en volver a hablar y el texto de las respuestas para comparar la calidad.
+- [x] **5d. Candidato nuevo `JARVIS_PROMPT_PREAMBLE=1`** (apagado por defecto): una oración en el prompt para que, antes de llamar a una herramienta, JARVIS diga una frase muy corta y variada (2 a 5 palabras, p. ej. «Ya me fijo.»). Primero la prueba del prompt. Se mide con el modelo por defecto y se verifica en el flujo que la frase llega antes que la herramienta.
   - Implementado: `buildSystemPrompt({ userName, preamble })`, `config.promptPreamble` y `flags.promptPreamble` en el registro `servidor`. `textBeforeTool(record)` en `medir-lib.js` dice, por pedido, si el primer texto del servidor llegó antes que la primera herramienta.
 - Task 6 sigue como está, contra la base nueva. Discord ya figura `failed` en la base: no cuenta como perdido.
   - **Bloqueada en el paso 1 (spike), 2026-10-25. No se implementa, y se reporta a la persona.** Lo que se vio:
@@ -277,6 +277,20 @@ Cambios al plan, en este orden:
     - La mayor parte de las herramientas que sobran son de los servidores de la persona `Estima-prod-chris` y `crm` (unas 110), no de los conectores de claude.ai.
   - Opciones para que decida la persona: (a) dejarla de lado; (b) apagar los servidores de la persona por nombre con `deniedMcpServers` (son nombres simples: habría que probar si la denylist los toma, y leer sus nombres de la configuración de la persona); (c) aceptar el toggle con su efecto persistente. No se mide hasta decidir, así que no se gastan esos 12 turnos.
 - Task 9: combinar solo lo que mejoró ≥300 ms por su lado, reporte final y PARAR. No se cambia ningún default.
+  - **Resultados (2026-10-25, sesión nueva por corrida, mediana de primera frase en ms, sin frío; frío aparte):**
+
+    | config | agenda | correo | web | global | frío |
+    |---|---|---|---|---|---|
+    | base2 (`claude-opus-5-5`) | 6565 | 5755 | 18924 | 7973 | 5334 |
+    | sonnet (`claude-sonnet-5-5`) | 5345 | 4612 | 25889 | 5345 ✔ | 6367 |
+    | preámbulo (Opus + `JARVIS_PROMPT_PREAMBLE=1`) | 1015 | 1092 | 1436 | 1092 ✔ | 4123 |
+    | combinado (Sonnet + preámbulo) | 1658 | 1352 | 1776 | 1530 ✔ | 4730 |
+
+    - Con el preámbulo, el primer texto llega antes que la primera herramienta en 9 de 9 pedidos con herramientas, tanto en Opus como en Sonnet. El tiempo total (`doneMs`) casi no cambia.
+    - La prueba de delegación salió bien en los dos modelos: ambos usan `Agent(investigador)` en segundo plano. Opus contesta a los 7,9 s y dice el resultado a los 65 s. Sonnet contesta a los 6,2 s y lo dice a los 54 s.
+    - Turnos usados después de la decisión: unos 55 (base2 14, 3 de spike, sonnet 14, preámbulo 12, combinado 12).
+    - Los textos para comparar están en `logs/textos-comparacion.txt` (no se sube).
+  - [ ] **PARAR:** la persona decide qué pasar a default.
 - Presupuesto: unos 13 turnos usados. Quedan unos 64 (base nueva, filtro, Sonnet, preámbulo y una combinación a 12 cada una, más unos 4 de delegación), con un tope de unos 70 sin volver a preguntar.
 
 ## Fase D: cambios candidatos (cada uno con su bandera, apagado por defecto y medido)

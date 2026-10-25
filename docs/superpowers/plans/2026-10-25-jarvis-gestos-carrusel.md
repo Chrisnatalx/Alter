@@ -148,9 +148,9 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `buildRefreshPrompt({ now: Date, timezone, inboxSize }) -> string`
   - `buildRefreshOptions({ config, abortController, knownTools = [] }) -> object`: **no** importa `agent-options.js`. *Agregado por el spike:* `settingSources: ['user']` (con `[]` no hay conectores), `disallowedTools` = `knownTools` menos `READ_TOOLS` (saca del contexto todas las demás herramientas: el refresco pasa de US$0,167 a US$0,0074) y el JSON Schema sin la clave `$schema` (la CLI rechaza la de draft 2020-12 que pone `z.toJSONSchema`).
   - *Agregado por el spike:* `toolNames(statuses) -> string[]`: los nombres completos (`mcp__<servidor normalizado>__<herramienta>`) a partir de `mcpServerStatus()`. `listMcpTools({ queryFn, config }) -> Promise<string[]>`: abre una query sin mensajes (no gasta cupo), espera a que los conectores dejen de estar `pending` y devuelve `toolNames`.
-  - `runGoogleRefresh({ queryFn, config, now = new Date(), toolCache = { names: null } }) -> Promise<{ week: {start, end}, days: ReturnType<groupWeek>, inbox: FeedSchema['inbox'], meta: { ms, turns, costUsd } }>`. Si `toolCache.names` está vacío, primero llama a `listMcpTools`. Con el `system/init` actualiza `toolCache.names` con `msg.tools`, y si falta alguna de `READ_TOOLS` corta con `Error('No veo los conectores de Calendar y Gmail')` (sin conectores, haiku devolvía un JSON vacío pero válido).
+  - `runGoogleRefresh({ queryFn, config, now = new Date(), toolCache = { names: null } }) -> Promise<{ week: {start, end}, days: ReturnType<groupWeek>, inbox: FeedSchema['inbox'], meta: { ms, turns, costUsd } }>`. Si `toolCache.names` está vacío o tiene más de una hora, primero llama a `listMcpTools` (*corrección al implementar:* el `system/init` solo lista las herramientas que quedaron después del filtro, así que no sirve para renovar la lista). Si el `system/init` no trae alguna de `READ_TOOLS`, vacía `toolCache.names` y corta con `Error('No veo los conectores de Calendar y Gmail')` (sin conectores, haiku devolvía un JSON vacío pero válido).
 
-- [ ] **Step 1: Write the failing tests.** Zona `America/Argentina/Buenos_Aires`:
+- [x] **Step 1: Write the failing tests.** Zona `America/Argentina/Buenos_Aires`:
   - `weekRange`:
     - `weekRange(new Date('2026-10-25T15:00:00-03:00'), tz)` (domingo) es igual a `{ start: '2026-10-19', end: '2026-10-25' }`.
     - `weekRange(new Date('2026-10-26T09:00:00-03:00'), tz)` es igual a `{ start: '2026-10-26', end: '2026-11-01' }`.
@@ -178,9 +178,10 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
     - `buildRefreshOptions({ config, knownTools: [...READ_TOOLS, 'mcp__claude_ai_Gmail__send_message'] })`: `.settingSources` es igual a `['user']`, `.disallowedTools` es igual a `['mcp__claude_ai_Gmail__send_message']` y `.outputFormat.schema.$schema` es `undefined`.
     - `toolNames([{ name: 'claude.ai Gmail', tools: [{ name: 'search_threads' }] }, { name: 'x', status: 'failed' }])` es igual a `['mcp__claude_ai_Gmail__search_threads']`.
     - `missing connectors rejects`: con un `system/init` cuyo `tools` no trae `READ_TOOLS`, rechaza con `/conectores/`.
-    - `runGoogleRefresh` sin `toolCache.names` sondea una vez con `mcpServerStatus` y después usa los `tools` del `init`.
-- [ ] **Step 2: Run** `node --test test/google-feed.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
+    - `runGoogleRefresh` sin `toolCache.names` sondea una vez con `mcpServerStatus` y la segunda vez usa la lista guardada.
+    - `listMcpTools` vuelve a preguntar mientras haya conectores `pending`.
+- [x] **Step 2: Run** `node --test test/google-feed.test.js`. Expected: FAIL.
+- [x] **Step 3: Implement.**
   - `weekRange` y `groupWeek` sacan la fecha local con `Intl.DateTimeFormat('en-CA', { timeZone, … })`, sin librerías.
   - `buildRefreshOptions` usa la variante elegida en la tarea 1. Le suma `abortController` y, si existe, `pathToClaudeCodeExecutable: config.claudeBin`, con `systemPrompt` corto y propio (p. ej. «Sos un lector de datos. Usá solo las herramientas de lectura y devolvé exactamente el JSON pedido.»). Si la tarea 1 mostró que `dontAsk` no alcanza, también le suma un `canUseTool` que deniega todo lo que no esté en `READ_TOOLS`.
   - `buildRefreshPrompt` pide estos pasos:
@@ -190,8 +191,8 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
 
     Y pide que `declined` sea `true` cuando la propia respuesta al evento es «rechazado».
   - `runGoogleRefresh` arma un `AbortController` con timeout `config.feedTimeoutMs`, itera la query hasta el `result`, valida con `FeedSchema.safeParse` (si falla: `Error('El refresco devolvió un JSON inválido')`) y loguea `  [FEEDS] google <s> s · <turns> turnos · US$<costo>`.
-- [ ] **Step 4: Run** `npm test`. Expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Calendar y Gmail por una query de lectura aparte"`
+- [x] **Step 4: Run** `npm test`. Expected: PASS.
+- [x] **Step 5: Commit** `git commit -m "Calendar y Gmail por una query de lectura aparte"`
 
 ### Task 4: Caché y refresco en segundo plano (`src/feeds/cache.js`)
 

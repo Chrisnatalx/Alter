@@ -41,6 +41,10 @@ module.exports = Object.freeze({
   timezone: resolveTimezone(process.env.JARVIS_TIMEZONE),
   claudeBin: resolveClaudeBin(),
   confirmTimeoutMs: 2 * 60 * 1000, // sin respuesta en 2 minutos → se deniega
+  // Refresco en segundo plano de Calendar y Gmail para las vistas (src/feeds/): query aparte, solo lectura
+  feedModel: process.env.JARVIS_FEED_MODEL || 'haiku',
+  feedTimeoutMs: 120000,
+  inboxSize: 8, // hilos de la bandeja que entran en la cara de Mail
   coreDir,
   publicDir: path.join(ROOT, 'public'),
 });

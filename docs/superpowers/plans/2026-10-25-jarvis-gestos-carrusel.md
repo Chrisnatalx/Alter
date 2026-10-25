@@ -354,7 +354,7 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
 
     Mientras dura el pellizco no hay giros, y al soltar se vacía el historial de movimiento.
 
-- [ ] **Step 1: Write the failing tests.** Helpers: `handAt(x, y, { pose: 'open'|'pinch', ratio })` arma 21 puntos sintéticos coherentes con las reglas de pose, y `feed(tracker, frames)` acumula los eventos. Cuadros cada 33 ms.
+- [x] **Step 1: Write the failing tests.** Helpers: `handAt(x, y, { pose: 'open'|'pinch', ratio })` arma 21 puntos sintéticos coherentes con las reglas de pose, y `feed(tracker, frames)` acumula los eventos. Cuadros cada 33 ms.
   - `unmirror flips x only`.
   - `entering hand does not swipe`: la mano aparece en x=0.9 y en 150 ms llega a x=0.3. Sin `swipe`.
   - `fast right-to-left swipe goes left`: la mano está estable 250 ms en x=0.8 y después pasa de 0.8 a 0.35 en 250 ms con y fija. Exactamente un `{type:'swipe', dir:'left'}`.
@@ -368,10 +368,10 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `drag reports offset from grab point`: agarra en (0.5, 0.5) y se mueve a (0.6, 0.45). El último `drag` tiene `dx` ≈ 0.1 y `dy` ≈ −0.05.
   - `release on pose exit or hand loss`: sale un `release` al pasar a la pose `open`, o con `hand: null` durante más de `lostGraceMs`.
   - `no swipe during pinch`: con la pose de pellizco, un movimiento de 0.8 a 0.3 en 200 ms no da `swipe`.
-- [ ] **Step 2: Run** `node --test test/gestures.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement.** El giro compara la posición actual de `palmCenter` con la muestra más vieja dentro de `swipeWindowMs`. Cuenta solo si `stable` (presente sin cortes por `stableMs`), sin pellizco y fuera del enfriamiento. Al disparar, vacía el historial y arranca el enfriamiento.
-- [ ] **Step 4: Run** `npm test`. Expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Rastreador de gestos de la mano, puro y con tests"`
+- [x] **Step 2: Run** `node --test test/gestures.test.js`. Expected: FAIL.
+- [x] **Step 3: Implement.** El giro compara la posición actual de `palmCenter` con la muestra más vieja dentro de `swipeWindowMs`. Cuenta solo si `stable` (presente sin cortes por `stableMs`), sin pellizco y fuera del enfriamiento. Al disparar, vacía el historial y arranca el enfriamiento.
+- [x] **Step 4: Run** `npm test`. Expected: PASS.
+- [x] **Step 5: Commit** `git commit -m "Rastreador de gestos de la mano, puro y con tests"`
 
 ### Task 9: Navegación del carrusel y datos de la vista (`public/nav.js`)
 

@@ -240,9 +240,13 @@ Inferido (lo comprueba la tarea 6, paso 1):
 
 **Files:** ninguno del repo. Los resultados quedan en `logs/`, que no se sube.
 
-- [ ] **Step 1: Fijar el modelo base.** Se usa el `model` que anotó la tarea 2 (paso 5), que es el modelo por defecto de la cuenta. Si `settings.json` define `effortLevel` o `alwaysThinkingEnabled`, también se anota. Hoy no define ninguno de los dos.
-- [ ] **Step 2: Correr la base (12 turnos).** `MEDIR_CONFIG=base JARVIS_MODEL=<modelo de init> node scripts/medir.js`. Esperado: termina sin `TIMEOUT` ni código 2, y deja `logs/medicion-base-*.json`.
+- [x] **Step 1: Fijar el modelo base.** Se usa el `model` que anotó la tarea 2 (paso 5), que es el modelo por defecto de la cuenta. Si `settings.json` define `effortLevel` o `alwaysThinkingEnabled`, también se anota. Hoy no define ninguno de los dos.
+  - Anotado: `claude-opus-5-5`. Ni `settings.json` ni el `.env` de la persona definen `model`, `effortLevel`, `alwaysThinkingEnabled` ni `JARVIS_MODEL`.
+- [x] **Step 2: Correr la base (12 turnos).** `MEDIR_CONFIG=base JARVIS_MODEL=<modelo de init> node scripts/medir.js`. Esperado: termina sin `TIMEOUT` ni código 2, y deja `logs/medicion-base-*.json`.
+  - Corrido con `MEDIR_PORT=7781` (2026-10-25): código 0, sin `TIMEOUT`, sin confirmaciones ni `BLOQUEADO`. Archivo `logs/medicion-base-20261025-202937.json`.
+  - Hallazgos que afectan a las tareas siguientes: (a) en los 12 turnos **no hubo ninguna llamada a `Agent`**: el orquestador usó el conector de Calendar o Gmail, o `WebSearch`, directamente. (b) Al ser una sola sesión, algunas repeticiones se contestaron con lo que ya estaba en la conversación, sin herramientas (agenda en la corrida 3 y web en la 2), y eso baja las medianas. Hay que decidir si el guion abre una sesión nueva por corrida antes de comparar variantes.
 - [ ] **Step 3: Juntar la base de voz.** Se le pide a la persona que use JARVIS por voz de forma normal hasta tener al menos 8 registros `voz`, sin cambiar nada. Después se corre `node scripts/medir.js --voz logs/tiempos.jsonl`. Si en el registro ya hay suficientes de las tareas 2 y 3, alcanza con esos.
+  - Pendiente: todavía no hay registros `voz` (la verificación manual de la tarea 3 no se hizo).
 - [ ] **Step 4: Armar el reporte**, en el chat y no en un archivo:
   - la tabla de medianas por pedido (primera frase, primer texto, init y fin) y el arranque en frío;
   - el desglose de dónde se va el tiempo, contrastado con cada sospecha del spec:

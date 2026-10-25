@@ -9,7 +9,7 @@ function buildAgentOptions({ config, canUseTool, mcpServers, abortController }) 
     mcpServers,
     cwd: config.coreDir,
     includePartialMessages: true,
-    systemPrompt: buildSystemPrompt({ userName: config.userName }),
+    systemPrompt: buildSystemPrompt({ userName: config.userName, preamble: config.promptPreamble }),
     settingSources: ['user'],            // tus plugins y conectores…
     settings: { disableAllHooks: true, autoMemoryEnabled: false }, // …sin hooks ni memoria de archivos
     tools: ['WebSearch', 'WebFetch', 'Agent'], // de las herramientas internas, solo web y delegar: nada de terminal ni archivos

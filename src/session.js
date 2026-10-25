@@ -163,7 +163,7 @@ class Session {
     const payload = { turn: this.turnNo, model: this.state.model, ...summarizeTiming(this.timing) };
     this.timing = null;
     if (!this._closed) this.emit('timing', payload);
-    const flags = { mcpFilter: !!this.config.mcpFilter, promptDirect: !!this.config.promptDirect };
+    const flags = { mcpFilter: !!this.config.mcpFilter, promptDirect: !!this.config.promptDirect, promptPreamble: !!this.config.promptPreamble };
     this.timingLog.write({ tipo: 'servidor', fecha: new Date().toISOString(), ...payload, flags });
   }
 

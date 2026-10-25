@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  REQUESTS, SENTENCE_RE, hasFirstSentence, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice, planRuns,
+  REQUESTS, SENTENCE_RE, hasFirstSentence, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice, planRuns, textBeforeTool,
 } = require('../scripts/medir-lib');
 
 test('REQUESTS son los cuatro pedidos fijos', () => {
@@ -105,6 +105,13 @@ test('compareResults marca mejora de 300 ms o más', () => {
   assert.doesNotMatch(lines.find((l) => l.startsWith('casi')), /✔/);
   assert.doesNotMatch(lines.find((l) => l.startsWith('base')), /✔/);
   assert.match(lines[0], /frío/); // el arranque en frío también se compara, en su columna
+});
+
+test('textBeforeTool: ¿llegó texto antes de la primera herramienta?', () => {
+  assert.equal(textBeforeTool(rec({ server: { firstTextMs: 900, tools: [{ name: 'X', startMs: 1200 }] } })), true);
+  assert.equal(textBeforeTool(rec({ server: { firstTextMs: 3000, tools: [{ name: 'X', startMs: 1200 }] } })), false);
+  assert.equal(textBeforeTool(rec({ server: { firstTextMs: 900, tools: [] } })), null); // sin herramientas no aplica
+  assert.equal(textBeforeTool(rec({ server: null })), null);
 });
 
 test('summarizeVoice agrupa por modo de escucha', () => {

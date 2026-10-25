@@ -74,6 +74,13 @@ function checkEnv(env) {
   return null;
 }
 
+// En el flujo del servidor, ¿el primer texto llegó antes que la primera herramienta? null si no hubo herramientas
+function textBeforeTool(record) {
+  const tools = record.server?.tools || [];
+  if (!tools.length || record.server.firstTextMs == null) return null;
+  return record.server.firstTextMs < Math.min(...tools.map((t) => t.startMs));
+}
+
 function stats(records) {
   return {
     n: records.length,
@@ -142,4 +149,4 @@ function summarizeVoice(records) {
   return lines.join('\n');
 }
 
-module.exports = { REQUESTS, DELEGATION_REQUEST, SENTENCE_RE, hasFirstSentence, planRuns, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice };
+module.exports = { REQUESTS, DELEGATION_REQUEST, SENTENCE_RE, hasFirstSentence, planRuns, textBeforeTool, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice };

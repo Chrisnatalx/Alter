@@ -11,7 +11,7 @@ const REQUESTS = [
 
 // La misma regex que flushSentences en public/app.js (una prueba lo verifica): así «primera frase»
 // es lo mismo que la interfaz le entrega a la voz.
-const SENTENCE_RE = /[^.!?¿¡…\n]*[.!?…\n]+["')\]]*\s*/g;
+const SENTENCE_RE = /[^.!?…\n]*[.!?…\n]+["')\]]*\s*/g;
 
 // Hay una frase que la interfaz ya leería en voz alta (igual que flushSentences: más de un carácter)
 function hasFirstSentence(text) {

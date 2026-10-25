@@ -247,7 +247,7 @@ Inferido (lo comprueba la tarea 6, paso 1):
   - Hallazgos que afectan a las tareas siguientes: (a) en los 12 turnos **no hubo ninguna llamada a `Agent`**: el orquestador usó el conector de Calendar o Gmail, o `WebSearch`, directamente. (b) Al ser una sola sesión, algunas repeticiones se contestaron con lo que ya estaba en la conversación, sin herramientas (agenda en la corrida 3 y web en la 2), y eso baja las medianas. Hay que decidir si el guion abre una sesión nueva por corrida antes de comparar variantes.
 - [ ] **Step 3: Juntar la base de voz.** Se le pide a la persona que use JARVIS por voz de forma normal hasta tener al menos 8 registros `voz`, sin cambiar nada. Después se corre `node scripts/medir.js --voz logs/tiempos.jsonl`. Si en el registro ya hay suficientes de las tareas 2 y 3, alcanza con esos.
   - Pendiente: todavía no hay registros `voz` (la verificación manual de la tarea 3 no se hizo).
-- [ ] **Step 4: Armar el reporte**, en el chat y no en un archivo:
+- [x] **Step 4: Armar el reporte**, en el chat y no en un archivo:
   - la tabla de medianas por pedido (primera frase, primer texto, init y fin) y el arranque en frío;
   - el desglose de dónde se va el tiempo, contrastado con cada sospecha del spec:
     - (1) contexto: `tools` y `mcpTools` del registro `sesion`, más la lista de servidores y su `source`;
@@ -256,7 +256,19 @@ Inferido (lo comprueba la tarea 6, paso 1):
     - (4) voz: `endToFinalMs`;
     - (5) conectores: la duración de las herramientas `mcp__claude_ai_*`;
   - qué candidatos tienen sentido según los números y el cupo que gastaría cada uno.
-- [ ] **Step 5: PARAR.** Mostrarle el reporte a la persona y esperar su visto bueno antes de seguir con la fase D. Si la persona quiere comparar otro modelo principal, se mide como una configuración más dentro del presupuesto, y la decisión es suya.
+- [x] **Step 5: PARAR.** Mostrarle el reporte a la persona y esperar su visto bueno antes de seguir con la fase D. Si la persona quiere comparar otro modelo principal, se mide como una configuración más dentro del presupuesto, y la decisión es suya.
+
+### Decisiones de la persona sobre el reporte base (2026-10-25)
+
+Cambios al plan, en este orden:
+- [x] **5a. Arreglo de `¿` y `¡`:** `flushSentences` perdía el texto anterior a un `¿` o `¡` («Hola, ¿qué tal?» sonaba como «qué tal?»). La regex deja de excluirlos al principio de la frase, `SENTENCE_RE` se mantiene igual que la de `app.js` y una prueba lo cubre. Va en su propio commit.
+- [ ] **5b. Una sesión nueva por corrida:** `scripts/medir.js` hace `POST /api/new` (con `force`) entre corridas para que ninguna repetición se conteste con lo que ya estaba en la conversación. Se vuelve a medir la base (12 turnos, `claude-opus-5-5`) antes de comparar. El primer pedido de cada corrida es arranque en frío.
+- **Task 7 (`JARVIS_PROMPT_DIRECT`) en espera:** no se implementa hasta que la persona decida. En la base no hubo delegación en las consultas rápidas.
+- [ ] **5c. Modelo principal Sonnet:** configuración `sonnet` con `JARVIS_MODEL=claude-sonnet-5-5` (12 turnos) contra la base nueva. Además, una prueba de delegación por modelo (Opus y Sonnet) con «investigá a fondo las novedades de Node 24 y avisame»: si delega en `investigador` en segundo plano (`Agent` con ese subagente y `task_started`), cuánto tarda en volver a hablar y el texto de las respuestas para comparar la calidad.
+- [ ] **5d. Candidato nuevo `JARVIS_PROMPT_PREAMBLE=1`** (apagado por defecto): una oración en el prompt para que, antes de llamar a una herramienta, JARVIS diga una frase muy corta y variada (2 a 5 palabras, p. ej. «Ya me fijo.»). Primero la prueba del prompt. Se mide con el modelo por defecto y se verifica en el flujo que la frase llega antes que la herramienta.
+- Task 6 sigue como está, contra la base nueva. Discord ya figura `failed` en la base: no cuenta como perdido.
+- Task 9: combinar solo lo que mejoró ≥300 ms por su lado, reporte final y PARAR. No se cambia ningún default.
+- Presupuesto: unos 13 turnos usados. Quedan unos 64 (base nueva, filtro, Sonnet, preámbulo y una combinación a 12 cada una, más unos 4 de delegación), con un tope de unos 70 sin volver a preguntar.
 
 ## Fase D: cambios candidatos (cada uno con su bandera, apagado por defecto y medido)
 

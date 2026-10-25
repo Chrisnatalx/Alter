@@ -404,7 +404,7 @@
   // Lee por oraciones completas para que la voz empiece rápido y suene natural
   function flushSentences(force) {
     if (!cur) return;
-    const re = /[^.!?¿¡…\n]*[.!?…\n]+["')\]]*\s*/g;
+    const re = /[^.!?…\n]*[.!?…\n]+["')\]]*\s*/g; // ¿ y ¡ abren frase: quedan adentro, no la cortan
     let m, last = 0;
     while ((m = re.exec(cur.speakBuf)) !== null) {
       if (m[0].trim().length > 1) speakTimed(m[0]);

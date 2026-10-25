@@ -26,6 +26,28 @@ test('SENTENCE_RE es la misma que usa flushSentences', () => {
   assert.equal(m[1], SENTENCE_RE.source);
 });
 
+// Corta como flushSentences: cada coincidencia de más de un carácter es una frase para la voz
+function split(source, text) {
+  const re = new RegExp(source, 'g');
+  const out = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m[0].trim().length > 1) out.push(m[0].trim());
+    if (m.index === re.lastIndex) re.lastIndex++;
+  }
+  return out;
+}
+
+test('flushSentences no pierde el texto antes de ¿ o ¡', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const source = app.slice(app.indexOf('function flushSentences')).match(/const re = \/(.+)\/g;/)[1];
+  for (const src of [source, SENTENCE_RE.source]) {
+    assert.deepEqual(split(src, 'Hola, ¿qué tal? Todo bien.'), ['Hola, ¿qué tal?', 'Todo bien.']);
+    assert.deepEqual(split(src, '¡Listo! Ya está.'), ['¡Listo!', 'Ya está.']);
+    assert.deepEqual(split(src, 'Uno. Dos… ¿Tres?\n'), ['Uno.', 'Dos…', '¿Tres?']);
+  }
+});
+
 test('hasFirstSentence', () => {
   assert.equal(hasFirstSentence('Hola'), false);
   assert.equal(hasFirstSentence('Hola, ¿qué tal? '), true);

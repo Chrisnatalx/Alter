@@ -35,27 +35,66 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.task': 'application/octet-stream',
 };
 
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// La ruta pedida, ya decodificada, o null si viene mal codificada (p. ej. "/%": sin token, cualquiera puede mandarlo)
+function decodedPath(req) {
+  try { return decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { return null; }
+}
+
+// Archivo `rel` dentro de `root`, o null si se sale (con .., barras invertidas o lo que sea)
+function resolveInside(root, rel) {
+  const base = path.resolve(root);
+  const file = path.normalize(path.join(base, rel));
+  return file.startsWith(base + path.sep) ? file : null;
+}
+
+// La página solo puede hablar con este servidor: así el cliente de estadísticas que trae MediaPipe
+// (odml.pa.googleapis.com) queda bloqueado. Las fuentes de Google y el reconocimiento de voz no pasan por connect-src.
+const CSP = "connect-src 'self'";
+
 function serveStatic(req, res, token = TOKEN) {
-  let urlPath;
-  try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; } // p. ej. "/%": sin token, cualquiera puede mandarlo
+  const urlPath = decodedPath(req);
+  if (urlPath === null) { res.writeHead(400).end(); return; }
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-  const file = path.normalize(path.join(config.publicDir, rel));
-  if (!file.startsWith(config.publicDir)) { res.writeHead(403).end(); return; }
+  const file = resolveInside(config.publicDir, rel);
+  if (!file) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('not found'); return; }
     const type = MIME[path.extname(file)] || 'application/octet-stream';
+    const headers = { 'Content-Type': type, 'Cache-Control': 'no-store' };
     if (file.endsWith('index.html')) {
       data = Buffer.from(data.toString('utf8')
         .replace('__JARVIS_TOKEN__', () => token) // con función: `$&` y similares no se interpretan
         .replace('__JARVIS_USER__', () => escapeHtml(config.userName)));
+      headers['Content-Security-Policy'] = CSP;
     }
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    res.writeHead(200, headers);
     res.end(data);
   });
+}
+
+// /vendor/… → MediaPipe (de node_modules) y el modelo de manos (de vendor/), sin CDN.
+// Devuelve false si la ruta no es de /vendor/, para que siga serveStatic.
+function serveVendor(req, res, roots = config.vendor) {
+  const urlPath = decodedPath(req);
+  if (urlPath === null) return false;
+  const prefix = Object.keys(roots).find((p) => urlPath.startsWith(p));
+  if (!prefix) return false;
+  const rel = urlPath.slice(prefix.length);
+  const file = rel.includes('..') ? null : resolveInside(roots[prefix], rel);
+  if (!file) { res.writeHead(403).end(); return true; }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404).end('not found'); return; }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
+    res.end(data);
+  });
+  return true;
 }
 
 // El cuerpo debe ser un objeto JSON: `null`, un número o una lista darían 500 al leer sus campos.
@@ -208,6 +247,7 @@ function handleRequest(req, res, deps) {
   }
   if (req.method === 'GET') {
     if (!deps.allowedHosts.has(req.headers.host)) { res.writeHead(403).end(); return; }
+    if (serveVendor(req, res)) return;
     return serveStatic(req, res, deps.token);
   }
   res.writeHead(405).end();
@@ -252,4 +292,4 @@ server.listen(PORT, '127.0.0.1', () => {
   feeds.start();
 });
 
-module.exports = { server, PORT, isTrusted, handleRequest, serveStatic };
+module.exports = { server, PORT, isTrusted, handleRequest, serveStatic, serveVendor };

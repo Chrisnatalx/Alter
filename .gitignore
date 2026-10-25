@@ -1,4 +1,5 @@
 node_modules/
 .core/
+vendor/
 .env
 .superpowers/

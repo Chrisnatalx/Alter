@@ -207,6 +207,67 @@ test('serveStatic: una ruta mal codificada (/%) da 400 y no tira el servidor', a
   assert.equal(viaRoute.status, 400);
 });
 
+// ---- MediaPipe y el modelo, servidos desde el servidor local ----
+const os = require('node:os');
+const fsx = require('node:fs');
+const pathx = require('node:path');
+const { serveVendor } = require('../src/server');
+async function vendor(url, roots) {
+  const res = fakeRes();
+  const handled = serveVendor({ url }, res, roots);
+  if (handled) await res.finished;
+  return { handled, res };
+}
+
+test('serveStatic index lleva CSP connect-src self', async () => {
+  const res = fakeRes();
+  serveStatic({ url: '/' }, res, token);
+  await res.finished;
+  assert.equal(res.headers['Content-Security-Policy'], "connect-src 'self'");
+});
+
+test('serveVendor sirve el bundle como JS y el wasm como application/wasm', async () => {
+  const a = await vendor('/vendor/mediapipe/vision_bundle.mjs');
+  assert.equal(a.handled, true);
+  assert.equal(a.res.status, 200);
+  assert.equal(a.res.headers['Content-Type'], 'text/javascript; charset=utf-8');
+  assert.equal(a.res.headers['Cache-Control'], 'public, max-age=86400');
+  const b = await vendor('/vendor/mediapipe/wasm/vision_wasm_internal.wasm');
+  assert.equal(b.res.status, 200);
+  assert.equal(b.res.headers['Content-Type'], 'application/wasm');
+});
+
+test('missing model gives 404', async () => {
+  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'jarvis-vendor-'));
+  const { res } = await vendor('/vendor/models/hand_landmarker.task', { '/vendor/models/': dir });
+  assert.equal(res.status, 404);
+});
+
+test('serveVendor bloquea salir de la raíz', async () => {
+  let checked = 0;
+  for (const url of ['/vendor/mediapipe/../../package.json', '/vendor/mediapipe/%2e%2e/%2e%2e/package.json', '/vendor/mediapipe/..%5c..%5cpackage.json', '/vendor/models/..%2f..%2fpackage.json']) {
+    const { handled, res } = await vendor(url);
+    if (!handled) continue; // la URL normalizada ya no es de /vendor/: la atiende serveStatic, dentro de public/
+    checked++;
+    assert.ok(res.status === 403 || res.status === 404, `${url} → ${res.status}`);
+  }
+  assert.ok(checked >= 2); // las barras codificadas sí llegan a serveVendor
+});
+
+test('serveVendor ignora otras rutas', async () => {
+  assert.equal((await vendor('/app.js')).handled, false);
+});
+
+test('GET /vendor con un host ajeno da 403', async () => {
+  const res = await call(mkDeps(fakeSession()), 'GET', '/vendor/mediapipe/vision_bundle.mjs', undefined, { host: 'evil.com' });
+  assert.equal(res.status, 403);
+});
+
+test('GET /vendor por handleRequest sirve el bundle', async () => {
+  const res = await call(mkDeps(fakeSession()), 'GET', '/vendor/mediapipe/vision_bundle.mjs');
+  assert.equal(res.status, 200);
+});
+
 // ---- Feeds (Calendar, Mail y Clima de las vistas) ----
 function fakeFeeds() {
   const calls = [];

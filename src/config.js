@@ -49,4 +49,9 @@ module.exports = Object.freeze({
   feedStaleMs: 5 * 60 * 1000,     // al volver a la pestaña, se refresca si los datos tienen más de 5 minutos
   coreDir,
   publicDir: path.join(ROOT, 'public'),
+  // Lo que la página carga de /vendor/: MediaPipe desde node_modules y el modelo de manos (npm run modelo)
+  vendor: Object.freeze({
+    '/vendor/mediapipe/': path.join(ROOT, 'node_modules', '@mediapipe', 'tasks-vision'),
+    '/vendor/models/': path.join(ROOT, 'vendor'),
+  }),
 });

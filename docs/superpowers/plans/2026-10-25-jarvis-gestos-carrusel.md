@@ -303,17 +303,17 @@ Decide las opciones de la tarea 3 con datos reales. Gasta cupo: como mucho 4 que
   - `serveStatic` responde `index.html` con `Content-Security-Policy: connect-src 'self'`.
 - Consumes (en el navegador, tarea 10): `/vendor/mediapipe/vision_bundle.mjs`, `/vendor/mediapipe/wasm` (base del fileset) y `/vendor/models/hand_landmarker.task`.
 
-- [ ] **Step 1: Write the failing tests.** `fakeRes.writeHead(s, h)` ahora guarda `res.headers = h`.
+- [x] **Step 1: Write the failing tests.** `fakeRes.writeHead(s, h)` ahora guarda `res.headers = h`.
   - `serveStatic index lleva CSP connect-src self`: `res.headers['Content-Security-Policy'] === "connect-src 'self'"`.
   - `serveVendor sirve el bundle como JS`: con raíces reales, `/vendor/mediapipe/vision_bundle.mjs` da `200` con `Content-Type` `text/javascript; charset=utf-8`, y `/vendor/mediapipe/wasm/vision_wasm_internal.wasm` da `application/wasm`.
   - `missing model gives 404`: con `roots = { '/vendor/models/': <dir temporal vacío> }`, `/vendor/models/hand_landmarker.task` da `404`.
   - `serveVendor bloquea salir de la raíz`: `/vendor/mediapipe/../../package.json` y `/vendor/mediapipe/%2e%2e/%2e%2e/package.json` dan `403` o `404`, y nunca `200`.
   - `serveVendor ignora otras rutas`: `/app.js` devuelve `false`.
   - Por `handleRequest`, `GET /vendor/...` con un host ajeno da `403`.
-- [ ] **Step 2: Run** `node --test test/server.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `handleRequest` prueba primero `serveVendor` y después `serveStatic`, dentro de la misma rama `GET` que ya verifica `allowedHosts`. La comprobación de raíz se reutiliza: extraer `resolveInside(root, rel)` de `serveStatic`. Sumar `vendor/` a `.gitignore`.
-- [ ] **Step 4: Run** `npm install` (descarga el modelo) y `npm test`. Expected: el modelo queda en `vendor/` y `npm test` pasa.
-- [ ] **Step 5: Commit** `git commit -m "MediaPipe y el modelo de manos servidos desde el servidor local"`
+- [x] **Step 2: Run** `node --test test/server.test.js`. Expected: FAIL.
+- [x] **Step 3: Implement.** `handleRequest` prueba primero `serveVendor` y después `serveStatic`, dentro de la misma rama `GET` que ya verifica `allowedHosts`. La comprobación de raíz se reutiliza: extraer `resolveInside(root, rel)` de `serveStatic`. Sumar `vendor/` a `.gitignore`.
+- [x] **Step 4: Run** `npm install` (descarga el modelo) y `npm test`. Expected: el modelo queda en `vendor/` y `npm test` pasa.
+- [x] **Step 5: Commit** `git commit -m "MediaPipe y el modelo de manos servidos desde el servidor local"`
 
 ### Task 8: Rastreador de gestos puro (`public/gestures.js`)
 

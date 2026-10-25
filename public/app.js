@@ -397,7 +397,9 @@
       if (stale) await stale; // que el corte llegue al servidor antes que el mensaje nuevo
       if (seq !== askSeq) return; // ESC o una pregunta nueva mientras esperaba el corte: este mensaje ya no se manda
       cur = turn; // recién ahora: lo que llegue del turno cortado no se pinta como respuesta nueva
-      const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId });
+      // Con una vista abierta, JARVIS sabe qué mira la persona («el segundo» es el segundo de la lista visible)
+      const view = viewPayload(app.face, { shownInbox, week: feedCache.google?.data?.week });
+      const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId, ...(view ? { view } : {}) });
       if (res.status === 403) throw new Error('El servidor se reinició: recargá la página con F5.');
       if (!res.ok) throw new Error('El servidor respondió ' + res.status);
     } catch (err) {
@@ -585,6 +587,9 @@
         $('t-link').textContent = 'CEDIDO';
         setState('idle');
         break;
+      case 'feeds': // datos nuevos para las vistas
+        applyFeeds(data);
+        break;
       case 'reset':
         cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; activeTurn = false; staleTurn = false;
         closeConfirm(); stopSpeaking(); taskRows.clear(); $('tasks').innerHTML = '';
@@ -631,6 +636,7 @@
         if (!res.ok || !res.body) throw new Error('El servidor respondió ' + res.status);
         fails = 0;
         $('t-link').textContent = 'ESTABLE';
+        loadFeeds(); // lo que ya tiene el servidor; lo nuevo llega por el evento `feeds`
         await readEvents(res);
       } catch (err) {
         console.warn('Canal de eventos:', err.message);
@@ -1003,6 +1009,7 @@
   // Un evento del rastreador: la presencia la muestra el indicador; el pellizco mueve el núcleo y el giro, el carrusel
   function onGesture(ev) {
     if (ev.type === 'hand') { cam.hand = ev.present; setHandState(); return; }
+    if (ev.type === 'swipe') { go(ev.dir); return; }
     pinchGesture(ev);
   }
 
@@ -1033,6 +1040,86 @@
     }, 5000);
     setInterval(() => { if (cam.status === 'on' && cam.x != null) console.log(`[cam] palma x=${cam.x.toFixed(2)}`); }, 500);
   }
+
+  // ============================================================
+  //  CARRUSEL DE VISTAS (Calendar, Mail y Clima; los datos ya están guardados en el servidor)
+  // ============================================================
+  const { RING, navigate, viewPayload } = window.JarvisNav;
+  const Faces = window.JarvisFaces;
+  app.nav = { face: 'core', from: 'core' };
+  let ringTurn = 0;           // vueltas acumuladas: de Mail al Núcleo sigue girando para el mismo lado
+  let feedCache = {};         // el último snapshot de /api/feeds: { google, weather }
+  let shownInbox = [];        // la bandeja tal como se ve: congelada mientras Mail está abierta
+  let shownMail = null;       // con qué datos se congeló (para su «actualizado hace…»)
+
+  function setFace(nav) {
+    const prev = app.face;
+    app.nav = nav; app.face = nav.face;
+    document.body.dataset.face = nav.face;
+    if (nav.face !== 'core') Object.assign(coreFxTarget, { zoom: 1, ox: 0, oy: 0 }); // el pellizco es solo del núcleo
+    $('ring').style.transform = `translateZ(calc(var(--face-r) * -1)) rotateY(${-ringTurn * 120}deg)`;
+    const idx = RING.indexOf(nav.face === 'weather' ? nav.from : nav.face);
+    [...$('face-dots').children].forEach((d, i) => d.classList.toggle('on', i === idx));
+    if (nav.face === 'mail' && prev !== 'mail') { // al entrar se congela la lista que se va a ver
+      shownInbox = feedCache.google?.data?.inbox || [];
+      shownMail = feedCache.google;
+      renderMail();
+    }
+  }
+
+  function go(dir) {
+    const next = navigate(app.nav, dir);
+    if (next === app.nav) return;
+    if (dir === 'left') ringTurn++;
+    if (dir === 'right') ringTurn--;
+    setFace(next);
+  }
+
+  // En Mail abierta se pinta la lista congelada; si no, la de la caché (así al girar ya está al día)
+  function renderMail() {
+    if (app.face === 'mail') Faces.renderMail($('face-mail'), shownMail, shownInbox);
+    else Faces.renderMail($('face-mail'), feedCache.google);
+  }
+  function renderFaces() {
+    Faces.renderCalendar($('face-calendar'), feedCache.google);
+    Faces.renderWeather($('weather-face'), feedCache.weather);
+    renderMail();
+  }
+
+  // Llegaron datos nuevos. Si los trajo una escritura de JARVIS (respondió, archivó, borró), también se
+  // actualiza la lista de Mail abierta: un hilo que ya no está no puede seguir siendo «el segundo».
+  function applyFeeds(snap) {
+    feedCache = snap || {};
+    if (app.face === 'mail' && snap?.reason === 'write') {
+      shownInbox = feedCache.google?.data?.inbox || [];
+      shownMail = feedCache.google;
+    }
+    renderFaces();
+  }
+
+  async function loadFeeds() {
+    try {
+      const res = await fetch('/api/feeds', { headers: { 'X-Jarvis-Token': TOKEN } });
+      if (res.ok) applyFeeds(await res.json());
+    } catch (e) { console.warn('No pude traer los datos de las vistas:', e); }
+  }
+
+  // Al volver a la pestaña, si los datos tienen más de 5 minutos, se piden de nuevo (llegan por `feeds`)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !app.replaced) post('/api/feeds/refresh', { ifOlderMs: 300000 }).catch(() => {});
+  });
+  setInterval(renderFaces, 30000); // el «actualizado hace…»
+
+  // Flechas del teclado: lo mismo que los gestos, para probar sin cámara
+  const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  addEventListener('keydown', (e) => {
+    const dir = ARROWS[e.code];
+    if (!dir || e.repeat || document.activeElement === $('text-input') || document.activeElement?.tagName === 'SELECT' || document.activeElement?.type === 'range' || app.state === 'boot') return;
+    e.preventDefault();
+    go(dir);
+  });
+  renderFaces();
+  setFace(app.nav);
 
   // ============================================================
   //  SECUENCIA DE ARRANQUE

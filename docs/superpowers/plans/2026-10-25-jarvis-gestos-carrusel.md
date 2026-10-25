@@ -498,25 +498,25 @@ Es pegamento del navegador: se verifica a mano.
   - `JarvisFaces.renderCalendar(el, google)`, `renderMail(el, inbox)` y `renderWeather(el, weather)`. Usan `textContent`, nunca `innerHTML` con datos.
   - En `app.js`: `app.nav = { face:'core', from:'core' }`, `app.face`, `feedCache` (el último snapshot) y `shownInbox` (la lista congelada).
 
-- [ ] **Step 1: Implement las caras (`faces.js` y `style.css`).** Estética HUD con los tokens de `style.css`, como en la maqueta:
+- [x] **Step 1: Implement las caras (`faces.js` y `style.css`).** Estética HUD con los tokens de `style.css`, como en la maqueta:
   - Calendar: 7 columnas (`LUN 26 … DOM 1`) con el día de hoy marcado. Los eventos de día completo van arriba y los demás con su `HH:MM título`.
   - Mail: los hilos de `inbox` con remitente y asunto, y los no leídos marcados.
   - Clima: el ahora (temperatura, sensación, etiqueta, viento y humedad) y los próximos días (día, etiqueta, máxima y mínima, probabilidad de lluvia).
   - Cada cara lleva `agoLabel`, o `ERROR: <motivo>` si `error` y no hay datos.
-- [ ] **Step 2: Implement el carrusel.**
+- [x] **Step 2: Implement el carrusel.**
   - Hay un contenedor con `perspective` y un anillo con `transform-style: preserve-3d`, con las caras en `rotateY(i*120deg) translateZ(r)`. El giro es `rotateY(-índice*120deg)` con una transición de unos 600 ms.
   - El Clima baja desde arriba con `rotateX` y `translateY`, fuera del anillo.
   - Los puntitos `#face-dots` marcan la cara del anillo.
   - Cambiar de cara mueve el núcleo a la esquina (o al centro) con `coreLayout`.
   - `onGesture` hace `swipe → app.nav = navigate(app.nav, dir)`.
   - Las flechas del teclado (←, →, ↑, ↓) hacen lo mismo, para probar sin cámara.
-- [ ] **Step 3: Implement los datos.**
+- [x] **Step 3: Implement los datos.**
   - Al conectar el canal se hace `GET /api/feeds`.
   - Con el evento `feeds`, `onEvent` actualiza `feedCache` y vuelve a pintar Calendar y Clima. **Mail no se vuelve a pintar mientras `app.face === 'mail'`, salvo que el refresco lo haya disparado una escritura de JARVIS** (el watcher de la tarea 4 pide `feeds.refresh('google', { reason: 'write' })` y el evento `feeds` lleva `reason: 'write'`). En ese caso `shownInbox` se actualiza y se repinta, para que un hilo que JARVIS borró o archivó no siga en pantalla y «el segundo» no apunte a un hilo que ya no está. Esto lo decidió Claude: el spec pedía las dos cosas a la vez.
   - Al entrar a Mail, `shownInbox = feedCache.google.data?.inbox || []` y se pinta.
   - Con `visibilitychange` a visible, `post('/api/feeds/refresh', { ifOlderMs: 300000 })`.
   - El «actualizado hace» se recalcula cada 30 s.
-- [ ] **Step 4: Implement la voz en las vistas.** En `ask()`, el `POST /api/message` suma `view: viewPayload(app.face, { shownInbox, week: feedCache.google?.data?.week })`.
+- [x] **Step 4: Implement la voz en las vistas.** En `ask()`, el `POST /api/message` suma `view: viewPayload(app.face, { shownInbox, week: feedCache.google?.data?.week })`.
 - [ ] **Step 5: Verificación manual (gasta algunos turnos):**
   - Desde el Núcleo, un gesto brusco hacia tu izquierda gira a Calendar como una rotación. Repetirlo lleva a Mail y después al Núcleo. Hacia tu derecha vuelve.
   - Hacia arriba aparece el Clima, y hacia abajo vuelve a la cara de antes.
@@ -525,7 +525,17 @@ Es pegamento del navegador: se verifica a mano.
   - En Mail, decir «¿de qué trata el segundo?»: la terminal muestra que JARVIS usa el id del hilo 2 (`get_thread`). Decir «respondé el segundo con un ok»: aparece la confirmación de siempre. Al confirmar, la terminal muestra `[FEEDS] google …` y, al salir y volver a entrar a Mail, la lista está al día.
   - En Calendar y en Clima, preguntar algo: la respuesta se refiere a la vista.
   - El núcleo chiquito cambia de color al escuchar, pensar y hablar.
-- [ ] **Step 6: Run** `npm test`. Expected: PASS.
+
+  *Hecho sin cámara (2026-10-25)*, con Chrome headless por CDP y las flechas del teclado:
+  - ← tres veces: Calendar, Mail y de vuelta al Núcleo, siempre girando para el mismo lado (`ringTurn` acumulado). → desde el Núcleo va a Mail. ↑ abre el Clima y ↓ vuelve a la cara de antes; ← en el Clima no hace nada. Los puntitos siguen la cara del anillo.
+  - En una captura a mitad del giro se ve la rotación 3D. El núcleo chiquito queda abajo a la derecha y `#core-btn` lo sigue.
+  - Las tres caras se pintan con datos reales (7 días, 8 hilos numerados, el ahora y 5 días de clima) y su «actualizado hace…».
+  - Con `window.fetch` reemplazado en la página (nada sale del navegador), `POST /api/message` lleva `view` según la cara: nada en el Núcleo, `{face:'calendar', week}`, `{face:'mail', threads: 8}` y `{face:'weather'}`.
+  - Una segunda pestaña deja a la primera con `CÁMARA APAGADA` y el aviso de enlace cedido.
+  - *Incidente:* un primer intento de interceptar el pedido por CDP (`Fetch.enable`) no frenó nada, y antes de eso el micrófono falso de Chrome «habló» una vez: llegaron **9 mensajes de prueba reales** a la conversación («hola en el núcleo», «qué tengo el martes», «de qué trata el segundo», «va a llover», dos veces, y uno de ruido). En la terminal solo hubo lecturas (`get_thread`, `WebSearch`, `WebFetch`), ninguna confirmación ni envío.
+  - *Cambio de interfaz:* `renderMail(el, google, inbox = google.data.inbox)`: recibe también el feed, para el «actualizado hace…» de la lista congelada.
+  - Queda para la persona: los gestos de verdad, gesticular hablando, la voz en las vistas y el color del núcleo chiquito.
+- [x] **Step 6: Run** `npm test`. Expected: PASS.
 - [ ] **Step 7: Commit** `git commit -m "Carrusel de vistas: Calendar, Mail y Clima, con la voz en todas"`
 
 ### Task 13: README y verificación final

@@ -38,6 +38,18 @@
     </g>
   </svg>
 
+  <!-- Carrusel de vistas: Núcleo → Calendar → Mail en un anillo 3D; el Clima queda arriba, fuera del anillo.
+       Solo se mira: dentro de una vista se actúa por voz. -->
+  <section id="carousel" class="carousel" aria-label="Vistas">
+    <div id="ring" class="carousel-ring">
+      <div class="face face-core" data-face="core"><header class="face-head"><h4>NÚCLEO</h4></header></div>
+      <div class="face face-calendar" data-face="calendar" id="face-calendar"></div>
+      <div class="face face-mail" data-face="mail" id="face-mail"></div>
+    </div>
+  </section>
+  <section id="weather-face" class="face face-weather" aria-label="Clima"></section>
+  <div id="face-dots" class="face-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+
   <!-- Zona clickeable del núcleo: interrumpe la respuesta o prende/apaga el micrófono -->
   <button id="core-btn" aria-label="Interrumpir o prender/apagar el micrófono"></button>
 
@@ -128,6 +140,7 @@
   <script src="gestures.js"></script>
   <script src="nav.js"></script>
   <script src="hands.js"></script>
+  <script src="faces.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -219,10 +219,87 @@ body:not([data-face="core"]) #hud { opacity: 0; }
 body:not([data-face="core"]) #core-btn { left: calc(100% - 90px); top: calc(100% - 170px); width: 96px; height: 96px; }
 body:not([data-face="core"]) .panel.right { bottom: 240px; } /* el registro le deja lugar al núcleo chiquito */
 
+/* ---------- Carrusel de vistas ---------- */
+:root {
+  --face-w: min(720px, calc(100vw - 640px));
+  --face-h: min(430px, 56vh);
+  --face-r: calc(var(--face-w) * 0.2887); /* apotema de un prisma de 3 caras: w / (2·tan 60°) */
+}
+.carousel {
+  position: fixed; left: 50%; top: 45%; width: var(--face-w); height: var(--face-h);
+  transform: translate(-50%, -50%); perspective: 1600px; pointer-events: none;
+  transition: transform .6s ease, opacity .6s;
+}
+.carousel-ring {
+  position: absolute; inset: 0; transform-style: preserve-3d;
+  transform: translateZ(calc(var(--face-r) * -1)) rotateY(0deg);
+  transition: transform .6s cubic-bezier(.4, .1, .2, 1);
+}
+.face {
+  position: absolute; inset: 0; padding: 16px 18px; overflow: hidden;
+  background: linear-gradient(135deg, rgba(4, 19, 31, .9), rgba(4, 19, 31, .72));
+  border: 1px solid var(--cyan-dim); box-shadow: 0 0 30px rgba(62, 242, 255, .14), inset 0 0 24px rgba(62, 242, 255, .06);
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+  backface-visibility: hidden; transition: opacity .6s;
+}
+.carousel-ring .face[data-face="calendar"] { transform: rotateY(120deg) translateZ(var(--face-r)); }
+.carousel-ring .face[data-face="mail"] { transform: rotateY(240deg) translateZ(var(--face-r)); }
+.carousel-ring .face[data-face="core"] { transform: translateZ(var(--face-r)); background: transparent; box-shadow: none; border-color: var(--cyan-faint); }
+body[data-face="core"] .face-core { opacity: 0; } /* de frente, el núcleo es el canvas: la cara queda solo como marco al girar */
+.face-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.face-head h4 { margin: 0; font: 400 13px 'Orbitron', sans-serif; letter-spacing: .2em; color: var(--accent); transition: color .6s; }
+.face-status { font: 10px 'Share Tech Mono', monospace; letter-spacing: .15em; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.face-status.err { color: var(--amber); opacity: .85; }
+
+/* Calendar: la semana en 7 columnas */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; height: calc(100% - 30px); }
+.day { border: 1px solid var(--cyan-faint); padding: 5px; font-size: 12px; overflow: hidden; min-width: 0; }
+.day b { display: block; font: 400 11px 'Share Tech Mono', monospace; color: var(--accent); opacity: .8; margin-bottom: 5px; }
+.day.today { border-color: var(--accent); box-shadow: inset 0 0 14px var(--cyan-faint); }
+.ev {
+  background: var(--cyan-faint); border-left: 2px solid var(--cyan); padding: 2px 4px; margin-bottom: 4px; font-size: 11.5px; line-height: 1.2;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; /* hasta dos líneas */
+}
+.ev.allday { border-left-color: var(--amber); background: rgba(255, 181, 71, .1); }
+
+/* Mail: la bandeja, numerada (para «el segundo») */
+.threads { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.thread { display: grid; grid-template-columns: 22px 14px minmax(90px, 28%) 1fr; gap: 8px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--cyan-faint); }
+.thread .n { font: 11px 'Share Tech Mono', monospace; opacity: .5; }
+.thread .u { color: var(--accent); font-size: 10px; }
+.thread .from, .thread .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread.unread .from, .thread.unread .subject { color: #e9fbff; font-weight: 600; }
+.thread:not(.unread) { opacity: .75; }
+.threads .empty { padding: 12px 0; font: 12px 'Share Tech Mono', monospace; opacity: .5; }
+
+/* Clima: arriba, fuera del anillo */
+.face-weather {
+  position: fixed; inset: auto; left: 50%; top: 45%; width: min(560px, calc(100vw - 32px)); z-index: 1;
+  transform: translate(-50%, -160%) rotateX(-55deg); opacity: 0; pointer-events: none;
+  transition: transform .6s cubic-bezier(.4, .1, .2, 1), opacity .5s;
+}
+body[data-face="weather"] .face-weather { transform: translate(-50%, -50%); opacity: 1; }
+body[data-face="weather"] .carousel { transform: translate(-50%, -10%) rotateX(35deg) scale(.85); opacity: .15; }
+.face-weather .now { display: flex; align-items: center; gap: 22px; margin: 6px 0 16px; }
+.face-weather .temp { font: 600 54px 'Orbitron', sans-serif; color: var(--accent); text-shadow: 0 0 18px var(--accent); }
+.face-weather .info .label { font-size: 22px; font-weight: 600; }
+.face-weather .info .meta { font: 11px 'Share Tech Mono', monospace; opacity: .7; margin-top: 4px; }
+.face-weather .days { list-style: none; margin: 0; padding: 0; }
+.face-weather .wday { display: grid; grid-template-columns: 70px 1fr 90px 90px; gap: 10px; padding: 6px 0; border-top: 1px solid var(--cyan-faint); font-size: 14px; }
+.face-weather .wday b { font: 400 12px 'Share Tech Mono', monospace; color: var(--accent); }
+.face-weather .wday .mm, .face-weather .wday .rain { font: 12px 'Share Tech Mono', monospace; text-align: right; }
+
+/* Puntitos: en qué cara del anillo estás */
+.face-dots { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: none; }
+.face-dots i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--accent); transition: background .3s; }
+.face-dots i.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+body[data-face="weather"] .face-dots { opacity: .35; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .panel { display: none; }
   .subtitles { width: calc(100vw - 32px); }
+  :root { --face-w: calc(100vw - 48px); }
 }
 @media (max-width: 760px) {
   .top { padding: 16px; }

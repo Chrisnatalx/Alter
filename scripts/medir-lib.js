@@ -9,6 +9,9 @@ const REQUESTS = [
   { id: 'web', text: 'Buscá en la web el pronóstico del tiempo para mañana en Buenos Aires.' },
 ];
 
+// Prueba de delegación (MEDIR_DELEGACION=1): una investigación larga que debería ir al investigador en segundo plano
+const DELEGATION_REQUEST = { id: 'delegacion', text: 'Investigá a fondo las novedades de Node 24 y avisame.' };
+
 // La misma regex que flushSentences en public/app.js (una prueba lo verifica): así «primera frase»
 // es lo mismo que la interfaz le entrega a la voz.
 const SENTENCE_RE = /[^.!?…\n]*[.!?…\n]+["')\]]*\s*/g;
@@ -22,6 +25,16 @@ function hasFirstSentence(text) {
     if (m.index === re.lastIndex) re.lastIndex++;
   }
   return false;
+}
+
+// Orden de los pedidos: cada corrida en una sesión nueva, para que ninguna repetición se conteste con lo
+// que ya está en la conversación. Así el primer pedido de cada corrida incluye crear la sesión (frío).
+function planRuns(runs, requests) {
+  const plan = [];
+  for (let run = 1; run <= runs; run++) {
+    requests.forEach((request, i) => plan.push({ run, request, cold: i === 0, newSession: i === 0 && run > 1 }));
+  }
+  return plan;
 }
 
 function median(values) {
@@ -89,13 +102,15 @@ function compareResults(results) {
   const base = results[0];
   const width = Math.max(8, ...results.map((r) => r.config.length));
   const col = (s) => String(s).padStart(14);
-  const lines = [['config'.padEnd(width), ...ids.map(col), col('global'), '  Δ global'].join('')];
+  const lines = [['config'.padEnd(width), ...ids.map(col), col('frío'), col('global'), '  Δ global'].join('')];
+  const cell = (r, pick) => {
+    const v = pick(r.summary);
+    const b = pick(base.summary);
+    return col(r === base || v == null || b == null ? fmt(v) : `${fmt(v)} (${fmt(v - b)})`);
+  };
   for (const r of results) {
-    const cells = ids.map((id) => {
-      const v = r.summary.byRequest[id]?.firstSentenceMs;
-      const b = base.summary.byRequest[id]?.firstSentenceMs;
-      return col(r === base || v == null || b == null ? fmt(v) : `${fmt(v)} (${fmt(v - b)})`);
-    });
+    const cells = ids.map((id) => cell(r, (s) => s.byRequest[id]?.firstSentenceMs));
+    cells.push(cell(r, (s) => s.cold?.firstSentenceMs));
     const g = r.summary.all.firstSentenceMs;
     const bg = base.summary.all.firstSentenceMs;
     let delta = '';
@@ -105,7 +120,7 @@ function compareResults(results) {
     }
     lines.push([r.config.padEnd(width), ...cells, col(fmt(g)), delta].join(''));
   }
-  lines.push('(mediana del tiempo hasta la primera frase, en ms, sin el arranque en frío; entre paréntesis, contra la base)');
+  lines.push('(mediana del tiempo hasta la primera frase, en ms; «global» sin el arranque en frío, que va en su columna; entre paréntesis, contra la base)');
   return lines.join('\n');
 }
 
@@ -127,4 +142,4 @@ function summarizeVoice(records) {
   return lines.join('\n');
 }
 
-module.exports = { REQUESTS, SENTENCE_RE, hasFirstSentence, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice };
+module.exports = { REQUESTS, DELEGATION_REQUEST, SENTENCE_RE, hasFirstSentence, planRuns, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice };

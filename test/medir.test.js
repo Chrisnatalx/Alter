@@ -3,11 +3,20 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  REQUESTS, SENTENCE_RE, hasFirstSentence, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice,
+  REQUESTS, SENTENCE_RE, hasFirstSentence, median, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice, planRuns,
 } = require('../scripts/medir-lib');
 
 test('REQUESTS son los cuatro pedidos fijos', () => {
   assert.deepEqual(REQUESTS.map((r) => r.id), ['saludo', 'agenda', 'correo', 'web']);
+});
+
+test('planRuns: sesión nueva por corrida y el primer pedido de cada una es en frío', () => {
+  const plan = planRuns(2, REQUESTS);
+  assert.equal(plan.length, 8);
+  assert.deepEqual(plan.map((p) => p.newSession), [false, false, false, false, true, false, false, false]); // la primera ya arranca sin sesión
+  assert.deepEqual(plan.map((p) => p.cold), [true, false, false, false, true, false, false, false]);
+  assert.deepEqual(plan.map((p) => p.run), [1, 1, 1, 1, 2, 2, 2, 2]);
+  assert.equal(plan[4].request, REQUESTS[0]);
 });
 
 test('median con pares, impares y nulls', () => {
@@ -95,6 +104,7 @@ test('compareResults marca mejora de 300 ms o más', () => {
   assert.match(lines.find((l) => l.startsWith('rapida')), /✔ ≥300 ms/);
   assert.doesNotMatch(lines.find((l) => l.startsWith('casi')), /✔/);
   assert.doesNotMatch(lines.find((l) => l.startsWith('base')), /✔/);
+  assert.match(lines[0], /frío/); // el arranque en frío también se compara, en su columna
 });
 
 test('summarizeVoice agrupa por modo de escucha', () => {

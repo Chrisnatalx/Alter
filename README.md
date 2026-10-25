@@ -111,7 +111,7 @@ Hay tres tipos de registro (campo `tipo`):
 En la interfaz, la fila **VOZ** de la telemetría muestra el tiempo desde que dejaste de hablar hasta que JARVIS empezó a sonar (o desde el envío, si escribiste), y al pasar el mouse muestra el desglose por etapa.
 
 ### Medir tiempos
-`scripts/medir.js` compara configuraciones con un set fijo de cuatro pedidos (un saludo, «qué tengo hoy», «leé mi último mail» y una búsqueda web). Levanta su propio servidor (puerto 7789, o `MEDIR_PORT`), manda los cuatro pedidos 3 veces (o `MEDIR_RUNS`) en una sola sesión, rechaza toda confirmación y corta con código 2 si el servidor llegara a permitir un envío. El primer pedido incluye crear la sesión y se reporta aparte como arranque en frío.
+`scripts/medir.js` compara configuraciones con un set fijo de cuatro pedidos (un saludo, «qué tengo hoy», «leé mi último mail» y una búsqueda web). Levanta su propio servidor (puerto 7789, o `MEDIR_PORT`), manda los cuatro pedidos 3 veces (o `MEDIR_RUNS`), rechaza toda confirmación y corta con código 2 si el servidor llegara a permitir un envío. Cada corrida usa una sesión nueva (`POST /api/new` entre corridas), para que ninguna repetición se conteste con lo que ya estaba en la conversación. Por eso el primer pedido de cada corrida (el saludo) incluye crear la sesión y se reporta aparte, como arranque en frío. Con `MEDIR_DELEGACION=1`, al final y con la sesión tibia, pide una investigación larga y anota si la delega en el `investigador` en segundo plano y cuánto tarda en volver a hablar con el resultado (unos 2 turnos más).
 ```
 MEDIR_CONFIG=base JARVIS_MODEL=<modelo> node scripts/medir.js
 node scripts/medir.js --comparar logs/medicion-base-….json logs/medicion-otra-….json

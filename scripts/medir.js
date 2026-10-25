@@ -4,19 +4,20 @@
 // Seguridad: toda confirmación se rechaza (allow:false) y, si el servidor llega a permitir un envío,
 // el guion corta y sale con código 2. Consume cupo de tu cuenta y puede abrir pestañas.
 //
-//   MEDIR_CONFIG=base JARVIS_MODEL=<id> [JARVIS_MCP_FILTER=1] [JARVIS_PROMPT_DIRECT=1] node scripts/medir.js
+//   MEDIR_CONFIG=base JARVIS_MODEL=<id> [JARVIS_MCP_FILTER=1] [JARVIS_PROMPT_PREAMBLE=1] [MEDIR_DELEGACION=1] node scripts/medir.js
 //   node scripts/medir.js --comparar logs/medicion-a.json logs/medicion-b.json …
 //   node scripts/medir.js --voz logs/tiempos.jsonl
 
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { REQUESTS, hasFirstSentence, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice } = require('./medir-lib');
+const { REQUESTS, DELEGATION_REQUEST, planRuns, hasFirstSentence, createSseParser, checkEnv, summarizeRuns, compareResults, summarizeVoice } = require('./medir-lib');
 
 const ROOT = path.join(__dirname, '..');
 const LOGS = path.join(ROOT, 'logs');
 const REQUEST_TIMEOUT_MS = 150000;
 const TASKS_WAIT_MS = 180000;
+const DELEGATION_WAIT_MS = 600000; // una investigación larga en segundo plano puede tardar minutos
 const SETTLE_MS = 2000;
 // El mismo criterio que guard() en scripts/e2e.sh
 const GUARD_RE = /CONFIRMADO|AUTOM.TICO\].*(send|reply|forward)/;
@@ -77,15 +78,26 @@ async function run() {
   const st = { origin: 'user', activeTurn: false, tasks: [], model: null, current: null };
   const onEvent = (event, data) => {
     const cur = st.current;
+    const dg = st.delegation; // prueba de delegación en curso: se sigue también el turno de la tarea
+    const rel = () => Date.now() - dg.t0;
     switch (event) {
-      case 'turn': st.origin = data.origin; st.activeTurn = true; break;
+      case 'turn':
+        st.origin = data.origin; st.activeTurn = true;
+        if (dg && data.origin === 'task' && dg.taskTurnMs == null) dg.taskTurnMs = rel();
+        break;
       case 'init': if (data.model) st.model = data.model; break;
       case 'tasks': st.tasks = data.tasks || []; break;
+      case 'task':
+        if (!dg) break;
+        if (data.status === 'running' && dg.taskStartedMs == null) { dg.taskStartedMs = rel(); dg.taskAgent = data.agent || null; }
+        else if (data.status !== 'running') { dg.taskEndMs = rel(); dg.taskStatus = data.status; }
+        break;
       case 'confirm':
         if (cur) cur.denied = true;
         post('confirm', { id: data.id, allow: false }).then((r) => console.log(`  [DENEGADO] confirmación ${data.id} (HTTP ${r.status})`)).catch(() => {});
         break;
       case 'delta':
+        if (st.origin === 'task' && dg) dg.taskText += data.text;
         if (st.origin === 'task' || !cur || cur.finished) break;
         if (cur.httpFirstTextMs == null) cur.httpFirstTextMs = Date.now() - cur.t0;
         cur.text += data.text;
@@ -98,6 +110,8 @@ async function run() {
       case 'error': {
         const wasTask = st.origin === 'task';
         st.activeTurn = false; st.origin = 'user';
+        // La interfaz dice el turno de una tarea entero al terminar: ahí JARVIS vuelve a hablar
+        if (wasTask && dg && dg.taskTurnDoneMs == null) dg.taskTurnDoneMs = rel();
         if (wasTask || !cur || cur.finished) break;
         if (event === 'error') { cur.interrupted = true; cur.error = data.message; }
         if (data.interrupted) cur.interrupted = true;
@@ -117,37 +131,61 @@ async function run() {
     try { for await (const chunk of events.body) feed(dec.decode(chunk, { stream: true })); } catch { /* se cierra al salir */ }
   })();
 
+  // Un pedido: lo manda, espera su done (o el timeout) y devuelve el registro
+  async function askOne(req, run, cold) {
+    const cur = { request: req.id, run, cold, interrupted: false, timeout: false, denied: false, firstSentenceMs: null, httpFirstTextMs: null, server: null, text: '', t0: 0, finished: false };
+    const finished = new Promise((r) => { cur.resolve = r; });
+    st.current = cur;
+    cur.t0 = Date.now();
+    const res = await post('message', { text: req.text });
+    if (res.status !== 202) throw new Error(`POST /api/message respondió ${res.status}`);
+    let timeoutHandle;
+    const timer = new Promise((r) => { timeoutHandle = setTimeout(() => r('timeout'), REQUEST_TIMEOUT_MS); });
+    const guard = (async () => { while (!blocked && !cur.finished) await sleep(200); return blocked ? 'blocked' : 'ok'; })();
+    const outcome = await Promise.race([finished.then(() => 'ok'), timer, guard]);
+    clearTimeout(timeoutHandle);
+    if (outcome === 'timeout') { cur.timeout = true; cur.finished = true; await post('interrupt', {}).catch(() => {}); }
+    st.current = null;
+    const { t0, resolve, finished: done, ...record } = cur; // eslint-disable-line no-unused-vars
+    console.log(cur.timeout ? 'TIMEOUT' : `primera frase ${cur.firstSentenceMs ?? '—'} ms · fin ${cur.server?.doneMs ?? '—'} ms${cur.denied ? ' · confirmación denegada' : ''}${cur.interrupted ? ' · interrumpido' : ''}`);
+    return record;
+  }
+
+  // Que terminen las tareas en segundo plano y el turno que las cuenta (con tope)
+  async function waitIdle(limitMs) {
+    const until = Date.now() + limitMs;
+    while (!blocked && (st.tasks.length || st.activeTurn) && Date.now() < until) await sleep(500);
+    await sleep(SETTLE_MS);
+  }
+
   const records = [];
-  let first = true;
-  for (let run = 1; run <= runs; run++) {
-    for (const req of REQUESTS) {
-      if (blocked) break;
-      const cur = { request: req.id, run, cold: first, interrupted: false, timeout: false, denied: false, firstSentenceMs: null, httpFirstTextMs: null, server: null, text: '', t0: 0, finished: false };
-      first = false;
-      const finished = new Promise((r) => { cur.resolve = r; });
-      st.current = cur;
-      process.stdout.write(`  [${run}/${runs}] ${req.id} … `);
-      cur.t0 = Date.now();
-      const res = await post('message', { text: req.text });
-      if (res.status !== 202) throw new Error(`POST /api/message respondió ${res.status}`);
-      let timeoutHandle;
-      const timer = new Promise((r) => { timeoutHandle = setTimeout(() => r('timeout'), REQUEST_TIMEOUT_MS); });
-      const guard = (async () => { while (!blocked && !cur.finished) await sleep(200); return blocked ? 'blocked' : 'ok'; })();
-      const outcome = await Promise.race([finished.then(() => 'ok'), timer, guard]);
-      clearTimeout(timeoutHandle);
-      if (outcome === 'timeout') { cur.timeout = true; cur.finished = true; await post('interrupt', {}).catch(() => {}); }
-      const { t0, resolve, finished: done, ...record } = cur; // eslint-disable-line no-unused-vars
-      records.push(record);
-      console.log(cur.timeout ? 'TIMEOUT' : `primera frase ${cur.firstSentenceMs ?? '—'} ms · fin ${cur.server?.doneMs ?? '—'} ms${cur.denied ? ' · confirmación denegada' : ''}${cur.interrupted ? ' · interrumpido' : ''}`);
-      if (blocked) break;
-      // Antes del pedido siguiente: que terminen las tareas en segundo plano y el turno que las cuenta
-      const until = Date.now() + TASKS_WAIT_MS;
-      while (!blocked && (st.tasks.length || st.activeTurn) && Date.now() < until) await sleep(500);
+  for (const step of planRuns(runs, REQUESTS)) {
+    if (blocked) break;
+    if (step.newSession) {
+      const r = await post('new', { force: true }); // sesión nueva: nada de lo anterior queda en el contexto
+      if (r.status !== 204) throw new Error(`POST /api/new respondió ${r.status}`);
       await sleep(SETTLE_MS);
     }
-    if (blocked) break;
+    process.stdout.write(`  [${step.run}/${runs}] ${step.request.id}${step.cold ? ' (frío)' : ''} … `);
+    records.push(await askOne(step.request, step.run, step.cold));
+    if (!blocked) await waitIdle(TASKS_WAIT_MS);
   }
-  st.current = null;
+
+  // Prueba de delegación (opcional), con la sesión ya tibia: ¿manda la investigación larga al investigador
+  // en segundo plano?, ¿cuánto tarda en contestar y en volver a hablar con el resultado?
+  let delegation = null;
+  if (!blocked && env.MEDIR_DELEGACION === '1') {
+    st.delegation = { t0: Date.now(), taskStartedMs: null, taskAgent: null, taskEndMs: null, taskStatus: null, taskTurnMs: null, taskTurnDoneMs: null, taskText: '' };
+    process.stdout.write(`  [delegación] ${DELEGATION_REQUEST.id} … `);
+    const record = await askOne(DELEGATION_REQUEST, 0, false);
+    if (!blocked && st.delegation.taskStartedMs != null) await waitIdle(DELEGATION_WAIT_MS);
+    const dg = st.delegation;
+    st.delegation = null;
+    delete dg.t0;
+    const agentTool = (record.server?.tools || []).find((t) => t.name === 'Agent');
+    delegation = { ...record, ...dg, delegatedTo: agentTool?.agent ?? null, background: dg.taskStartedMs != null };
+    console.log(`    delegó en: ${delegation.delegatedTo ?? 'nadie'} · en segundo plano: ${delegation.background ? 'sí' : 'no'} · vuelve a hablar con el resultado a los ${dg.taskTurnDoneMs ?? '—'} ms`);
+  }
   ac.abort();
 
   if (blocked) {
@@ -159,10 +197,11 @@ async function run() {
   const summary = summarizeRuns(records);
   const out = {
     config: env.MEDIR_CONFIG,
-    env: { JARVIS_MODEL: env.JARVIS_MODEL, JARVIS_MCP_FILTER: env.JARVIS_MCP_FILTER, JARVIS_PROMPT_DIRECT: env.JARVIS_PROMPT_DIRECT },
+    env: { JARVIS_MODEL: env.JARVIS_MODEL, JARVIS_MCP_FILTER: env.JARVIS_MCP_FILTER, JARVIS_PROMPT_DIRECT: env.JARVIS_PROMPT_DIRECT, JARVIS_PROMPT_PREAMBLE: env.JARVIS_PROMPT_PREAMBLE },
     model: st.model,
     records,
     summary,
+    delegation,
   };
   const file = path.join(LOGS, `medicion-${label}.json`);
   fs.writeFileSync(file, JSON.stringify(out, null, 2));

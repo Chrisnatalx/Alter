@@ -1,11 +1,11 @@
-// J.A.R.V.I.S. — caras del carrusel: Calendar (la semana), Mail (la bandeja) y Clima (Buenos Aires).
+// ALTER — caras del carrusel: Calendar (la semana), Mail (la bandeja) y Clima (Buenos Aires).
 // Solo pinta: los datos llegan del servidor (GET /api/feeds y el evento `feeds`). Todo lo que viene de
 // afuera (títulos, asuntos, remitentes) entra con textContent, nunca con innerHTML.
 
 (() => {
   'use strict';
 
-  const { agoLabel } = window.JarvisNav;
+  const { agoLabel } = window.AlterNav;
 
   function h(tag, cls, text) {
     const el = document.createElement(tag);
@@ -97,5 +97,5 @@
     el.append(now, days);
   }
 
-  window.JarvisFaces = { renderCalendar, renderMail, renderWeather };
+  window.AlterFaces = { renderCalendar, renderMail, renderWeather };
 })();

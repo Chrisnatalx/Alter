@@ -165,7 +165,7 @@ function fakeQuery(script = []) {
 const fakeSdk = { createSdkMcpServer: () => ({}), tool: () => ({}) };
 const config = { timezone: 'America/Argentina/Buenos_Aires', confirmTimeoutMs: 5000, googleAccount: '' };
 // Con el filtro, las pruebas no leen el ~/.claude real: una carpeta que no existe
-const NO_HOME = require('node:path').join(require('node:os').tmpdir(), 'jarvis-sin-home-' + process.pid);
+const NO_HOME = require('node:path').join(require('node:os').tmpdir(), 'alter-sin-home-' + process.pid);
 const tick = () => new Promise((r) => setImmediate(r));
 
 test('Session emite los eventos de la query', async () => {
@@ -433,7 +433,7 @@ test('los uuid recordados se olvidan cuando arranca un turno de la persona', asy
 
 // ---- Tiempos por turno ----
 const spyLog = () => { const records = []; return { records, write: (r) => records.push(r) }; };
-const initFull = { ...init, tools: ['WebSearch', 'Agent', 'mcp__jarvis__x', 'mcp__claude_ai_Gmail__y'], mcp_servers: [{ name: 'jarvis', status: 'connected', source: 'sdk' }], skills: ['a'] };
+const initFull = { ...init, tools: ['WebSearch', 'Agent', 'mcp__alter__x', 'mcp__claude_ai_Gmail__y'], mcp_servers: [{ name: 'alter', status: 'connected', source: 'sdk' }], skills: ['a'] };
 
 test('timing: el turno de la persona emite timing antes de done y lo registra', async (t) => {
   t.mock.method(console, 'log', () => {});
@@ -465,9 +465,9 @@ test('con el filtro, el primer mensaje espera a que los conectores conservados t
   t.mock.method(console, 'warn', () => {});
   const kept = ['claude.ai Gmail', 'claude.ai Google Calendar', 'claude.ai Google Drive', 'claude.ai GitHub'];
   const answers = [
-    [{ name: 'jarvis', status: 'connected', source: 'sdk' }], // al principio los de claude.ai todavía no están
+    [{ name: 'alter', status: 'connected', source: 'sdk' }], // al principio los de claude.ai todavía no están
     [...kept.map((name) => ({ name, status: 'pending', source: 'claudeai' }))],
-    [...kept.map((name) => ({ name, status: 'connected', source: 'claudeai' })), { name: 'jarvis', status: 'connected', source: 'sdk' }, { name: 'plugin:discord:discord', status: 'failed', source: 'plugin' }],
+    [...kept.map((name) => ({ name, status: 'connected', source: 'claudeai' })), { name: 'alter', status: 'connected', source: 'sdk' }, { name: 'plugin:discord:discord', status: 'failed', source: 'plugin' }],
   ];
   let asked = 0;
   let askedWhenFirst = null;
@@ -526,7 +526,7 @@ test('con el filtro de MCP, el registro sesion lista los conservados que faltan 
   await tick();
   const sesion = log.records.find((r) => r.tipo === 'sesion');
   assert.ok(sesion.faltan.includes('claude.ai Gmail'));
-  assert.ok(!sesion.faltan.includes('jarvis'));
+  assert.ok(!sesion.faltan.includes('alter'));
   assert.match(warn.mock.calls[0].arguments[0], /Con el filtro de MCP faltan/);
   s.close();
 });

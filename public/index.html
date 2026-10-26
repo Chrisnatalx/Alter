@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="jarvis-token" content="__JARVIS_TOKEN__">
-  <meta name="jarvis-user" content="__JARVIS_USER__">
-  <title>J.A.R.V.I.S.</title>
+  <meta name="alter-token" content="__ALTER_TOKEN__">
+  <meta name="alter-user" content="__ALTER_USER__">
+  <title>ALTER</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Rajdhani:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -55,7 +55,7 @@
 
   <header class="top">
     <div class="brand">
-      <div class="logo">J.A.R.V.I.S.</div>
+      <div class="logo">ALTER</div>
       <div class="tag">Just A Rather Very Intelligent System</div>
     </div>
     <div class="clock">
@@ -89,7 +89,7 @@
     <ol id="log"></ol>
   </aside>
 
-  <!-- Confirmación de acciones: aparece cada vez que JARVIS quiere usar una herramienta -->
+  <!-- Confirmación de acciones: aparece cada vez que ALTER quiere usar una herramienta -->
   <section id="confirm" class="confirm" hidden role="alertdialog" aria-labelledby="confirm-title">
     <div class="confirm-head"><span class="confirm-icon">!</span>AUTORIZACIÓN REQUERIDA</div>
     <div id="confirm-title" class="confirm-title"></div>
@@ -101,11 +101,11 @@
     </div>
   </section>
 
-  <!-- Aviso cuando otra ventana de JARVIS tomó el canal de eventos: esta queda inactiva -->
+  <!-- Aviso cuando otra ventana de ALTER tomó el canal de eventos: esta queda inactiva -->
   <section id="replaced" class="replaced" hidden role="alertdialog" aria-labelledby="replaced-title">
     <div class="confirm-head"><span class="confirm-icon">!</span>ENLACE CEDIDO</div>
-    <div id="replaced-title" class="confirm-title">JARVIS está abierto en otra ventana</div>
-    <div class="confirm-hint">Cerrá esta pestaña, o recargá (F5) para traer a JARVIS de vuelta acá.</div>
+    <div id="replaced-title" class="confirm-title">ALTER está abierto en otra ventana</div>
+    <div class="confirm-hint">Cerrá esta pestaña, o recargá (F5) para traer a ALTER de vuelta acá.</div>
   </section>
 
   <!-- Estado de la cámara y los gestos (el video nunca se muestra) -->
@@ -132,7 +132,7 @@
 
   <div id="boot">
     <div class="boot-inner">
-      <div class="boot-logo">J.A.R.V.I.S.</div>
+      <div class="boot-logo">ALTER</div>
       <pre id="boot-log"></pre>
       <p id="boot-warn" class="warn" hidden></p>
     </div>

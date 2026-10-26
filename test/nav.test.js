@@ -12,7 +12,7 @@ test('la lista congelada de Mail', () => {
   // con datos: un refresco común no la toca…
   const f1 = freezeInbox(g1);
   assert.equal(nextFrozen(f1, g2, undefined), f1);
-  // …uno por escritura de JARVIS sí
+  // …uno por escritura de ALTER sí
   assert.deepEqual(nextFrozen(f1, g2, 'write').inbox, [{ id: 'b' }]);
   // un refresco que falló sin datos deja la lista vacía pero muestra el error
   const failed = nextFrozen(empty, { data: null, error: 'x' }, undefined);

@@ -1,4 +1,4 @@
-// Opciones del Claude Agent SDK para JARVIS. Un solo lugar, para que el chat y las tareas
+// Opciones del Claude Agent SDK para ALTER. Un solo lugar, para que el chat y las tareas
 // en segundo plano arranquen a Claude con la misma configuración.
 
 const { buildSystemPrompt } = require('./prompt');
@@ -19,7 +19,7 @@ function buildAgentOptions({ config, canUseTool, mcpServers, abortController }) 
     canUseTool,
     perTaskStopAffordance: true,         // interrupt() corta solo el turno actual; las tareas en segundo plano siguen
   };
-  // Solo los conectores que JARVIS conserva (src/mcp-filter.js); permisos y confirmaciones no cambian
+  // Solo los conectores que ALTER conserva (src/mcp-filter.js); permisos y confirmaciones no cambian
   if (config.mcpFilter) options.settings = { ...options.settings, ...buildMcpFilterSettings({ home: config.claudeHome }) };
   if (abortController) options.abortController = abortController;
   if (config.claudeBin) options.pathToClaudeCodeExecutable = config.claudeBin;

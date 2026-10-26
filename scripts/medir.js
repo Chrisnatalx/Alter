@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Guion de medición de JARVIS por HTTP: levanta el servidor con la configuración del entorno, manda
+// Guion de medición de ALTER por HTTP: levanta el servidor con la configuración del entorno, manda
 // los cuatro pedidos fijos varias veces en una sola sesión y guarda los tiempos por etapa.
 // Seguridad: toda confirmación se rechaza (allow:false) y, si el servidor llega a permitir un envío,
 // el guion corta y sale con código 2. Consume cupo de tu cuenta y puede abrir pestañas.
 //
-//   MEDIR_CONFIG=base JARVIS_MODEL=<id> [JARVIS_MCP_FILTER=0] [JARVIS_PROMPT_PREAMBLE=0] [MEDIR_DELEGACION=1] node scripts/medir.js
+//   MEDIR_CONFIG=base ALTER_MODEL=<id> [ALTER_MCP_FILTER=0] [ALTER_PROMPT_PREAMBLE=0] [MEDIR_DELEGACION=1] node scripts/medir.js
 //   node scripts/medir.js --comparar logs/medicion-a.json logs/medicion-b.json …
 //   node scripts/medir.js --voz logs/tiempos.jsonl
 
@@ -45,12 +45,12 @@ async function run() {
   const runs = Number(env.MEDIR_RUNS || 3);
   const base = `http://127.0.0.1:${port}`;
   console.log(`AVISO: este guion consume cupo de tu suscripción de Claude (${runs * REQUESTS.length} turnos) y puede abrir pestañas del navegador.`);
-  console.log(`Todas las confirmaciones se rechazan. Configuración: ${env.MEDIR_CONFIG} · modelo ${env.JARVIS_MODEL} · puerto ${port}`);
+  console.log(`Todas las confirmaciones se rechazan. Configuración: ${env.MEDIR_CONFIG} · modelo ${env.ALTER_MODEL} · puerto ${port}`);
 
   fs.mkdirSync(LOGS, { recursive: true });
   const label = `${env.MEDIR_CONFIG}-${stamp()}`;
   const serverLog = fs.createWriteStream(path.join(LOGS, `medir-servidor-${label}.log`));
-  const server = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...env, JARVIS_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...env, ALTER_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
   const kill = () => { try { server.kill(); } catch { /* ya terminó */ } };
   process.on('exit', kill);
   process.on('SIGINT', () => process.exit(130));
@@ -67,11 +67,11 @@ async function run() {
   // Espera a que el servidor responda y saca el token de la página, como e2e.sh
   let token = '';
   for (let i = 0; i < 100 && !token; i++) {
-    try { token = ((await (await fetch(base + '/')).text()).match(/name="jarvis-token" content="([^"]*)"/) || [])[1] || ''; } catch { /* todavía no escucha */ }
+    try { token = ((await (await fetch(base + '/')).text()).match(/name="alter-token" content="([^"]*)"/) || [])[1] || ''; } catch { /* todavía no escucha */ }
     if (!token) await sleep(200);
   }
   if (!token) throw new Error('No arrancó el servidor (ver logs/medir-servidor-*.log)');
-  const headers = { 'x-jarvis-token': token, 'Content-Type': 'application/json' };
+  const headers = { 'x-alter-token': token, 'Content-Type': 'application/json' };
   const post = (route, body) => fetch(base + '/api/' + route, { method: 'POST', headers, body: JSON.stringify(body) });
 
   // Estado que alimenta el canal de eventos
@@ -110,7 +110,7 @@ async function run() {
       case 'error': {
         const wasTask = st.origin === 'task';
         st.activeTurn = false; st.origin = 'user';
-        // La interfaz dice el turno de una tarea entero al terminar: ahí JARVIS vuelve a hablar
+        // La interfaz dice el turno de una tarea entero al terminar: ahí ALTER vuelve a hablar
         if (wasTask && dg && dg.taskTurnDoneMs == null) dg.taskTurnDoneMs = rel();
         if (wasTask || !cur || cur.finished) break;
         if (event === 'error') { cur.interrupted = true; cur.error = data.message; }
@@ -197,7 +197,7 @@ async function run() {
   const summary = summarizeRuns(records);
   const out = {
     config: env.MEDIR_CONFIG,
-    env: { JARVIS_MODEL: env.JARVIS_MODEL, JARVIS_MCP_FILTER: env.JARVIS_MCP_FILTER, JARVIS_PROMPT_PREAMBLE: env.JARVIS_PROMPT_PREAMBLE },
+    env: { ALTER_MODEL: env.ALTER_MODEL, ALTER_MCP_FILTER: env.ALTER_MCP_FILTER, ALTER_PROMPT_PREAMBLE: env.ALTER_PROMPT_PREAMBLE },
     model: st.model,
     records,
     summary,

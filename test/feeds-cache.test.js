@@ -172,7 +172,7 @@ test('después de un error, los refrescos de rutina esperan 2 minutos; los de es
   await cache.refresh('google', { ifOlderMs: 60000 });
   await cache.refreshAll();
   assert.equal(calls, 1);
-  await cache.refresh('google', { reason: 'write' });  // una escritura de JARVIS: va igual
+  await cache.refresh('google', { reason: 'write' });  // una escritura de ALTER: va igual
   assert.equal(calls, 2);
   advance(121e3);
   fail = false;

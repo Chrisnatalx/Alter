@@ -1,6 +1,6 @@
 // Tiempos por etapa de cada turno de la persona: cuándo llegó el mensaje, el init del SDK, el
 // primer texto del orquestador, cada herramienta y el fin. Sirve para saber dónde se va el tiempo
-// entre que la persona termina de hablar y que JARVIS empieza a contestar.
+// entre que la persona termina de hablar y que ALTER empieza a contestar.
 
 const fs = require('fs');
 const path = require('path');

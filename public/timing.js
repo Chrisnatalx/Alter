@@ -1,7 +1,7 @@
 // Tiempos de voz de cada turno, medidos en la página con performance.now(): fin del habla, frase
 // cerrada, mensaje enviado, primera frase en cola para la voz y comienzo de la voz. Se juntan con
 // el evento `timing` del servidor y se mandan a POST /api/timing. Funciona en el navegador
-// (window.JarvisTiming) y en Node (module.exports), para poder probarlo con node:test.
+// (window.AlterTiming) y en Node (module.exports), para poder probarlo con node:test.
 
 (function (root) {
   // Marcas de un turno; null = esa etapa no ocurrió (p. ej. un mensaje escrito no tiene fin del habla)
@@ -51,5 +51,5 @@
 
   const api = { emptyMarks, buildVoiceReport, formatBreakdown, isReportReady };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.JarvisTiming = api;
+  else root.AlterTiming = api;
 })(typeof window !== 'undefined' ? window : globalThis);

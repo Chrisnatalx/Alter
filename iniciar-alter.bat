@@ -1,5 +1,5 @@
 @echo off
-title J.A.R.V.I.S.
+title ALTER
 cd /d "%~dp0"
 rem Abre la interfaz en Chrome (o en el navegador por defecto) y levanta el servidor local.
 if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (

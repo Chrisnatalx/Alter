@@ -3,7 +3,7 @@
 
 // Por tipo de feed: una sola carga a la vez; si falla, se conserva lo anterior y se anota el error.
 // Después de una falla, los refrescos de rutina (al conectar, al volver a la pestaña, el intervalo) esperan
-// `errorBackoffMs`; el que pide una escritura de JARVIS pasa igual.
+// `errorBackoffMs`; el que pide una escritura de ALTER pasa igual.
 function createFeedCache({ loaders, intervalMs, hasClient, emit, now = Date.now, timers = { setInterval, clearInterval }, errorBackoffMs = 2 * 60 * 1000 }) {
   const kinds = Object.keys(loaders);
   const state = Object.fromEntries(kinds.map((k) => [k, { data: null, updatedAt: null, error: null, lastErrorAt: null, refreshing: false }]));
@@ -18,7 +18,7 @@ function createFeedCache({ loaders, intervalMs, hasClient, emit, now = Date.now,
     try { emit('feeds', reason ? { ...snap, reason } : snap); } catch { /* sin cliente: da igual */ }
   }
 
-  // Nunca rechaza. `reason: 'write'` avisa a la interfaz que JARVIS cambió algo (repinta Mail aunque esté abierta).
+  // Nunca rechaza. `reason: 'write'` avisa a la interfaz que ALTER cambió algo (repinta Mail aunque esté abierta).
   function refresh(kind, { ifOlderMs, reason } = {}) {
     const st = state[kind];
     if (!st) return Promise.resolve();

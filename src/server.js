@@ -1,4 +1,4 @@
-// JARVIS — servidor local.
+// ALTER — servidor local.
 // Sirve la interfaz (public/) y hace de puente entre el navegador y Claude a través del
 // Claude Agent SDK, que usa el login de Claude Code (tu suscripción). Hay una sola sesión viva
 // (src/session.js) y un canal de eventos permanente hacia la interfaz (src/events.js): la página
@@ -71,8 +71,8 @@ function serveStatic(req, res, token = TOKEN) {
     const headers = { 'Content-Type': type, 'Cache-Control': 'no-store' };
     if (file.endsWith('index.html')) {
       data = Buffer.from(data.toString('utf8')
-        .replace('__JARVIS_TOKEN__', () => token) // con función: `$&` y similares no se interpretan
-        .replace('__JARVIS_USER__', () => escapeHtml(config.userName)));
+        .replace('__ALTER_TOKEN__', () => token) // con función: `$&` y similares no se interpretan
+        .replace('__ALTER_USER__', () => escapeHtml(config.userName)));
       headers['Content-Security-Policy'] = CSP;
     }
     res.writeHead(200, headers);
@@ -123,12 +123,12 @@ function readJson(req) {
   });
 }
 
-// Solo aceptamos llamadas a la API desde la propia página de JARVIS.
+// Solo aceptamos llamadas a la API desde la propia página de ALTER.
 function isTrusted(req, { token, allowedHosts }) {
   if (!allowedHosts.has(req.headers.host)) return false; // bloquea DNS rebinding
   const origin = req.headers.origin;
   if (origin && !allowedHosts.has(origin.replace(/^https?:\/\//, ''))) return false;
-  const given = String(req.headers['x-jarvis-token'] || '');
+  const given = String(req.headers['x-alter-token'] || '');
   return given.length === token.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(token));
 }
 
@@ -195,6 +195,15 @@ async function handleMessage(req, res, deps) {
   res.writeHead(202).end();
 }
 
+// POST /api/warm { sessionId? } → 202 sin esperar. La página lo llama al abrir: la sesión (el proceso de Claude y los
+// conectores, ~4–5 s) arranca antes de que la persona hable, sin mandarle nada al modelo. Si falla, el primer
+// mensaje lo vuelve a intentar.
+async function handleWarm(req, res, deps) {
+  const payload = await readJson(req);
+  ensureSession(stateOf(deps), deps, payload.sessionId).catch((err) => console.error('  [ERROR] No pude arrancar la sesión:', err.message || err));
+  res.writeHead(202).end();
+}
+
 // POST /api/new { force? } → cierra la sesión; con tareas en segundo plano pide confirmar con force.
 async function handleNew(req, res, deps) {
   const payload = await readJson(req);
@@ -221,6 +230,7 @@ const GET_ROUTES = {
 const POST_ROUTES = {
   '/api/message': handleMessage,
   '/api/new': handleNew,
+  '/api/warm': handleWarm,
   '/api/feeds/refresh': handleFeedsRefresh,
   '/api/interrupt': async (req, res, deps) => {
     await readJson(req);
@@ -283,7 +293,7 @@ const feeds = createFeedCache({
   hasClient: hub.hasClient,
   emit: hub.emit,
 });
-// Si JARVIS respondió, archivó o borró algo en Gmail o Calendar, al terminar el turno se refresca
+// Si ALTER respondió, archivó o borró algo en Gmail o Calendar, al terminar el turno se refresca
 const watchFeeds = createFeedWatcher(() => feeds.refresh('google', { reason: 'write' }), { hasClient: hub.hasClient });
 const deps = {
   hub,
@@ -306,7 +316,7 @@ const server = http.createServer((req, res) => handleRequest(req, res, deps));
 // Solo escucha en localhost: la interfaz usa tu cuenta, no la expongas a la red.
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`
-  J.A.R.V.I.S. en línea → http://localhost:${PORT}
+  ALTER en línea → http://localhost:${PORT}
   Claude: ${config.claudeBin || 'incluido en el SDK'}
 `);
   feeds.start();

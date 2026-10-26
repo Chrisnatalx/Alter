@@ -1,9 +1,9 @@
 const { test, after } = require('node:test');
 const assert = require('node:assert');
 
-// Puerto 0: al cargar el módulo el servidor escucha, y no queremos chocar con un JARVIS real.
-process.env.JARVIS_PORT = '0';
-process.env.JARVIS_USER_NAME = 'A$&B$$<x>'; // la config es inmutable: se fija antes de cargarla
+// Puerto 0: al cargar el módulo el servidor escucha, y no queremos chocar con un ALTER real.
+process.env.ALTER_PORT = '0';
+process.env.ALTER_USER_NAME = 'A$&B$$<x>'; // la config es inmutable: se fija antes de cargarla
 const { server, isTrusted } = require('../src/server');
 after(() => server.close());
 
@@ -12,15 +12,15 @@ const allowedHosts = new Set(['localhost:7777', '127.0.0.1:7777']);
 const req = (headers) => ({ headers });
 
 test('isTrusted acepta host local con token correcto', () => {
-  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', 'x-jarvis-token': token }), { token, allowedHosts }), true);
-  assert.strictEqual(isTrusted(req({ host: '127.0.0.1:7777', origin: 'http://localhost:7777', 'x-jarvis-token': token }), { token, allowedHosts }), true);
+  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', 'x-alter-token': token }), { token, allowedHosts }), true);
+  assert.strictEqual(isTrusted(req({ host: '127.0.0.1:7777', origin: 'http://localhost:7777', 'x-alter-token': token }), { token, allowedHosts }), true);
 });
 
 test('isTrusted rechaza host ajeno, origen ajeno y token malo', () => {
-  assert.strictEqual(isTrusted(req({ host: 'evil.com', 'x-jarvis-token': token }), { token, allowedHosts }), false);
-  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', origin: 'http://evil.com', 'x-jarvis-token': token }), { token, allowedHosts }), false);
-  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', 'x-jarvis-token': 'b'.repeat(48) }), { token, allowedHosts }), false);
-  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', 'x-jarvis-token': 'abc' }), { token, allowedHosts }), false);
+  assert.strictEqual(isTrusted(req({ host: 'evil.com', 'x-alter-token': token }), { token, allowedHosts }), false);
+  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', origin: 'http://evil.com', 'x-alter-token': token }), { token, allowedHosts }), false);
+  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', 'x-alter-token': 'b'.repeat(48) }), { token, allowedHosts }), false);
+  assert.strictEqual(isTrusted(req({ host: 'localhost:7777', 'x-alter-token': 'abc' }), { token, allowedHosts }), false);
   assert.strictEqual(isTrusted(req({ host: 'localhost:7777' }), { token, allowedHosts }), false);
 });
 
@@ -31,7 +31,7 @@ const { handleRequest, serveStatic } = require('../src/server');
 function fakeReq(method, url, body, headers = {}) {
   const r = new EventEmitter();
   r.method = method; r.url = url;
-  r.headers = { host: 'localhost:7777', 'x-jarvis-token': token, ...headers };
+  r.headers = { host: 'localhost:7777', 'x-alter-token': token, ...headers };
   r.destroy = () => {};
   process.nextTick(() => { if (body !== undefined) r.emit('data', JSON.stringify(body)); r.emit('end'); });
   return r;
@@ -76,12 +76,12 @@ async function call(deps, method, url, body, headers) {
 }
 
 test('POST sin token da 403', async () => {
-  const res = await call(mkDeps(fakeSession()), 'POST', '/api/new', {}, { 'x-jarvis-token': '' });
+  const res = await call(mkDeps(fakeSession()), 'POST', '/api/new', {}, { 'x-alter-token': '' });
   assert.equal(res.status, 403);
 });
 
 test('GET /api/events sin token da 403', async () => {
-  const res = await call(mkDeps(fakeSession()), 'GET', '/api/events', undefined, { 'x-jarvis-token': '' });
+  const res = await call(mkDeps(fakeSession()), 'GET', '/api/events', undefined, { 'x-alter-token': '' });
   assert.equal(res.status, 403);
 });
 
@@ -112,6 +112,28 @@ test('una sesión cerrada se reemplaza en el siguiente mensaje', async () => {
   deps.sessionFactory = async () => fresh;
   await call(deps, 'POST', '/api/message', { text: 'dos' });
   assert.deepEqual(fresh.calls.send, [['dos', undefined]]);
+});
+
+test('POST /api/warm arranca la sesión que hay que retomar sin mandarle nada', async () => {
+  const s = fakeSession();
+  const deps = mkDeps(s);
+  const uuid = '123e4567-e89b-12d3-a456-426614174000';
+  const res = await call(deps, 'POST', '/api/warm', { sessionId: uuid });
+  assert.equal(res.status, 202);
+  assert.deepEqual(deps.created, [uuid]);
+  assert.deepEqual(s.calls.send, []);
+  // El mensaje que llega después usa esa misma sesión, y otro warm con la sesión viva no crea otra
+  await call(deps, 'POST', '/api/warm', {});
+  await call(deps, 'POST', '/api/message', { text: 'hola' });
+  assert.deepEqual(deps.created, [uuid]);
+  assert.deepEqual(s.calls.send, [['hola', undefined]]);
+});
+
+test('POST /api/warm responde aunque crear la sesión falle', async () => {
+  const deps = mkDeps(fakeSession());
+  deps.sessionFactory = async () => { throw new Error('sin claude'); };
+  const res = await call(deps, 'POST', '/api/warm', {});
+  assert.equal(res.status, 202);
 });
 
 test('POST /api/message pasa la vista que mira la persona', async () => {
@@ -238,7 +260,7 @@ test('serveVendor sirve el bundle como JS y el wasm como application/wasm', asyn
 });
 
 test('missing model gives 404', async () => {
-  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'jarvis-vendor-'));
+  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'alter-vendor-'));
   const { res } = await vendor('/vendor/models/hand_landmarker.task', { '/vendor/models/': dir });
   assert.equal(res.status, 404);
 });
@@ -264,7 +286,7 @@ test('GET /vendor con un host ajeno da 403', async () => {
 });
 
 test('HEAD /vendor dice si está el modelo sin mandar el archivo', async () => {
-  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'jarvis-vendor-'));
+  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'alter-vendor-'));
   const miss = fakeRes();
   serveVendor({ url: '/vendor/models/hand_landmarker.task', method: 'HEAD' }, miss, { '/vendor/models/': dir });
   await miss.finished;
@@ -299,7 +321,7 @@ function fakeFeeds() {
 const withFeeds = (feeds) => ({ ...mkDeps(fakeSession()), feeds });
 
 test('GET /api/feeds sin token da 403', async () => {
-  const res = await call(withFeeds(fakeFeeds()), 'GET', '/api/feeds', undefined, { 'x-jarvis-token': '' });
+  const res = await call(withFeeds(fakeFeeds()), 'GET', '/api/feeds', undefined, { 'x-alter-token': '' });
   assert.equal(res.status, 403);
 });
 
@@ -369,7 +391,7 @@ test('POST /api/timing sin token da 403', async () => {
   const records = [];
   const deps = mkDeps(fakeSession());
   deps.timingLog = { write: (r) => records.push(r) };
-  const res = await call(deps, 'POST', '/api/timing', { turn: 1 }, { 'x-jarvis-token': '' });
+  const res = await call(deps, 'POST', '/api/timing', { turn: 1 }, { 'x-alter-token': '' });
   assert.equal(res.status, 403);
   assert.equal(records.length, 0);
 });

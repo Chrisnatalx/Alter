@@ -1,4 +1,4 @@
-// Permisos de JARVIS: decide qué herramientas corren solas y cuáles esperan confirmación
+// Permisos de ALTER: decide qué herramientas corren solas y cuáles esperan confirmación
 // de la persona (las que envían o borran algo). Los subagentes nunca pueden confirmar.
 
 const crypto = require('crypto');
@@ -65,7 +65,7 @@ function createPermissionGate({ emit, timeoutMs }) {
     if (opts.agentID) {
       console.log(`  [DENEGADO A SUBAGENTE] ${toolName}`);
       emit('denied', { ...describeTool(toolName, opts.mcpServer), agent: opts.agentID });
-      resolve({ behavior: 'deny', message: 'Los subagentes no pueden enviar ni borrar: pedíselo a JARVIS.' });
+      resolve({ behavior: 'deny', message: 'Los subagentes no pueden enviar ni borrar: pedíselo a ALTER.' });
       return;
     }
     const id = crypto.randomUUID();

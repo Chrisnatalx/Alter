@@ -1,7 +1,7 @@
-// J.A.R.V.I.S. — cámara y seguimiento de manos en el navegador (MediaPipe HandLandmarker).
+// ALTER — cámara y seguimiento de manos en el navegador (MediaPipe HandLandmarker).
 // Todo corre acá: el video no se muestra ni sale de la máquina. MediaPipe, sus .wasm y el modelo se
 // sirven desde /vendor/ (el propio servidor), y la CSP connect-src 'self' bloquea su telemetría.
-// Entrega por cuadro los 21 puntos de la mano en coordenadas de la persona (JarvisGestures.unmirror), o null.
+// Entrega por cuadro los 21 puntos de la mano en coordenadas de la persona (AlterGestures.unmirror), o null.
 
 (() => {
   'use strict';
@@ -40,7 +40,7 @@
     try { res = landmarker.detectForVideo(video, t); } catch (e) { console.warn('Detección de manos:', e); return; }
     stats.n++; stats.ms += performance.now() - t;
     const lm = res?.landmarks?.[0];
-    cb.onFrame(t, lm ? window.JarvisGestures.unmirror(lm) : null);
+    cb.onFrame(t, lm ? window.AlterGestures.unmirror(lm) : null);
   }
 
   async function start({ onFrame, onStatus }) {
@@ -99,5 +99,5 @@
     return r;
   }
 
-  window.JarvisHands = { start, stop, takeStats };
+  window.AlterHands = { start, stop, takeStats };
 })();

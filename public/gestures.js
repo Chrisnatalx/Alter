@@ -1,11 +1,11 @@
-// J.A.R.V.I.S. — rastreador de gestos de la mano. Puro: recibe los 21 puntos de MediaPipe por cuadro y
+// ALTER — rastreador de gestos de la mano. Puro: recibe los 21 puntos de MediaPipe por cuadro y
 // devuelve eventos (giros, pellizco, agarre). Sin DOM ni dependencias, así se prueba en Node.
 // Coordenadas «de la persona»: x crece hacia su derecha (la webcam viene sin espejar, ver unmirror) e
 // y hacia abajo, las dos en fracción del cuadro (0..1).
 
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.JarvisGestures = factory();
+  else root.AlterGestures = factory();
 })(typeof self !== 'undefined' ? self : this, () => {
   'use strict';
 

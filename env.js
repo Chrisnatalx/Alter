@@ -1,5 +1,5 @@
 // Carga la configuración local desde `.env` (junto a este archivo) a process.env.
-// Lo usan server.js y bin/jarvis.js. Las variables que ya estén definidas en el entorno
+// Lo usan server.js y bin/alter.js. Las variables que ya estén definidas en el entorno
 // tienen prioridad sobre el archivo. `.env` no se sube al repo: ver `.env.example`.
 
 const fs = require('fs');

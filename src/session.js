@@ -3,7 +3,7 @@
 
 const { buildAgentOptions } = require('./agent-options');
 const { createPermissionGate, describeTool } = require('./permissions');
-const { createJarvisTools } = require('./tools');
+const { createAlterTools } = require('./tools');
 const { nowLine, viewLine } = require('./prompt');
 const { startTurnTiming, trackMessage, summarizeTiming } = require('./timing');
 const { missingKeptServers, keptConnectorsSettled } = require('./mcp-filter');
@@ -123,7 +123,7 @@ class Session {
     this.queue = createInputQueue();
     this.state = createState();
     this.gate = createPermissionGate({ emit, timeoutMs: config.confirmTimeoutMs });
-    this.tools = createJarvisTools(sdk, { emit, googleAccount: config.googleAccount });
+    this.tools = createAlterTools(sdk, { emit, googleAccount: config.googleAccount });
     this.q = null;
     this._closed = false;
     this.pushed = []; // uuid de mensajes enviados desde el último turno de la persona: pueden seguir en cola
@@ -148,7 +148,7 @@ class Session {
     const options = buildAgentOptions({
       config: this.config,
       canUseTool: this.gate.canUseTool,
-      mcpServers: { jarvis: this.tools },
+      mcpServers: { alter: this.tools },
     });
     if (resumeId && UUID.test(resumeId)) options.resume = resumeId;
     const prompt = this.config.mcpFilter ? this._afterKeptConnectors(this.queue.iterable) : this.queue.iterable;

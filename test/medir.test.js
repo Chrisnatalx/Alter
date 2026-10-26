@@ -73,11 +73,11 @@ test('createSseParser junta trozos partidos', () => {
   assert.deepEqual(got, [['timing', { turn: 1 }], ['done', {}]]);
 });
 
-test('checkEnv exige MEDIR_CONFIG y JARVIS_MODEL', () => {
+test('checkEnv exige MEDIR_CONFIG y ALTER_MODEL', () => {
   assert.match(checkEnv({}), /MEDIR_CONFIG/);
-  assert.match(checkEnv({ MEDIR_CONFIG: 'base' }), /JARVIS_MODEL/);
-  assert.match(checkEnv({ MEDIR_CONFIG: '../x', JARVIS_MODEL: 'm' }), /MEDIR_CONFIG/); // va en el nombre de archivo
-  assert.equal(checkEnv({ MEDIR_CONFIG: 'base', JARVIS_MODEL: 'claude-opus-5-5' }), null);
+  assert.match(checkEnv({ MEDIR_CONFIG: 'base' }), /ALTER_MODEL/);
+  assert.match(checkEnv({ MEDIR_CONFIG: '../x', ALTER_MODEL: 'm' }), /MEDIR_CONFIG/); // va en el nombre de archivo
+  assert.equal(checkEnv({ MEDIR_CONFIG: 'base', ALTER_MODEL: 'claude-opus-5-5' }), null);
 });
 
 const rec = (over) => ({ request: 'saludo', run: 1, cold: false, interrupted: false, timeout: false, denied: false, firstSentenceMs: 1000, httpFirstTextMs: 900, server: { initMs: 100, firstTextMs: 800, doneMs: 1500, tools: [] }, text: '', ...over });

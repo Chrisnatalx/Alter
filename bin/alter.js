@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Comando `jarvis`: levanta el servidor y abre la interfaz.
-// Si ya hay un JARVIS corriendo en el puerto, solo abre la ventana.
+// Comando `alter`: levanta el servidor y abre la interfaz.
+// Si ya hay un ALTER corriendo en el puerto, solo abre la ventana.
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-require('../env'); // antes de leer JARVIS_PORT, para que también valga desde .env
+require('../env'); // antes de leer ALTER_PORT, para que también valga desde .env
 
-const PORT = Number(process.env.JARVIS_PORT || 7777);
+const PORT = Number(process.env.ALTER_PORT || 7777);
 const URL = `http://localhost:${PORT}`;
 
 // Abre Chrome en modo app (ventana sin barras); si no está, usa el navegador por defecto.
@@ -25,7 +25,7 @@ function openUi() {
 
 const probe = http.get(URL, (res) => {
   res.resume();
-  console.log(`  J.A.R.V.I.S. ya está corriendo → ${URL}`);
+  console.log(`  ALTER ya está corriendo → ${URL}`);
   openUi();
 });
 probe.on('error', () => {

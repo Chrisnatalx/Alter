@@ -1,13 +1,13 @@
-// Herramientas propias de JARVIS, expuestas al modelo como un servidor MCP en proceso.
+// Herramientas propias de ALTER, expuestas al modelo como un servidor MCP en proceso.
 
 const { z } = require('zod');
 const { buildOpenUrl, openInBrowser } = require('./browser');
 const { findYoutubeVideo } = require('./youtube');
 
 // Se arma por pedido para poder avisarle a la interfaz qué se abrió (`emit`).
-function createJarvisTools(sdk, { emit, googleAccount }) {
+function createAlterTools(sdk, { emit, googleAccount }) {
   return sdk.createSdkMcpServer({
-    name: 'jarvis',
+    name: 'alter',
     version: '1.0.0',
     tools: [
       sdk.tool(
@@ -53,4 +53,4 @@ function createJarvisTools(sdk, { emit, googleAccount }) {
   });
 }
 
-module.exports = { createJarvisTools };
+module.exports = { createAlterTools };

@@ -1,13 +1,13 @@
-// Prompt de sistema de JARVIS y línea de fecha. Nada personal acá: el nombre viene de la configuración.
+// Prompt de sistema de ALTER y línea de fecha. Nada personal acá: el nombre viene de la configuración.
 
-// Preámbulo (por defecto; JARVIS_PROMPT_PREAMBLE=0 lo apaga): una frase corta antes de cada herramienta, para que
+// Preámbulo (por defecto; ALTER_PROMPT_PREAMBLE=0 lo apaga): una frase corta antes de cada herramienta, para que
 // la voz arranque mientras corre la consulta en vez de esperar a la respuesta completa. Medido: la primera frase
 // baja de unos 6 a 8 s a cerca de 1 s en agenda, correo y web.
 const PREAMBLE_RULE = 'Antes de llamar a cualquier herramienta, decí primero una frase muy corta, de dos a cinco palabras, y recién después usá la herramienta. Variala: rotá entre frases como «Ya me fijo.», «Dame un segundo.», «A ver, lo busco.», «Enseguida te digo.», «Un momento.» o «Lo reviso ya.», y no repitas la misma dos veces seguidas. Sin direcciones web.';
 
 function buildSystemPrompt({ userName, preamble = true }) {
   return [
-    'Sos JARVIS, un asistente de voz futurista que conversa con la persona usuaria en tiempo real.',
+    'Sos ALTER, un asistente de voz futurista que conversa con la persona usuaria en tiempo real.',
     userName ? `La persona se llama ${userName}.` : '',
     'Todo lo que escribas se va a leer en voz alta con síntesis de voz.',
     'Respondé en español rioplatense, con calidez y un toque de ingenio elegante.',

@@ -6,7 +6,7 @@ const { buildAgentOptions } = require('../src/agent-options');
 
 const config = { coreDir: '.', userName: '' };
 // Con el filtro, las pruebas no leen el ~/.claude real: una carpeta que no existe
-const NO_HOME = require('node:path').join(require('node:os').tmpdir(), 'jarvis-sin-home-' + process.pid);
+const NO_HOME = require('node:path').join(require('node:os').tmpdir(), 'alter-sin-home-' + process.pid);
 
 test('ningún subagente tiene herramientas de enviar o borrar', () => {
   const agents = buildAgents(config, {});
@@ -23,7 +23,7 @@ test('el investigador corre en segundo plano', () => {
 
 test('el modelo de cada subagente se puede pisar por entorno', () => {
   assert.equal(buildAgents(config, {}).agenda.model, 'haiku');
-  assert.equal(buildAgents(config, { JARVIS_AGENT_AGENDA_MODEL: 'sonnet' }).agenda.model, 'sonnet');
+  assert.equal(buildAgents(config, { ALTER_AGENT_AGENDA_MODEL: 'sonnet' }).agenda.model, 'sonnet');
 });
 
 test('los subagentes no cargan CLAUDE.md', () => {
@@ -46,7 +46,7 @@ test('con el filtro las confirmaciones no cambian', () => {
 test('buildAgentOptions busca los plugins en config.claudeHome', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'jarvis-home-'));
+  const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'alter-home-'));
   const install = path.join(home, 'discord');
   fs.mkdirSync(path.join(home, '.claude', 'plugins'), { recursive: true });
   fs.mkdirSync(install);

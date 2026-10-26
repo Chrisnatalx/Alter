@@ -1,9 +1,9 @@
-// J.A.R.V.I.S. — navegación del carrusel de vistas y datos de la vista abierta. Puro, sin DOM.
+// ALTER — navegación del carrusel de vistas y datos de la vista abierta. Puro, sin DOM.
 // El anillo es Núcleo → Calendar → Mail (y de vuelta al Núcleo); el Clima queda arriba, fuera del anillo.
 
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.JarvisNav = factory();
+  else root.AlterNav = factory();
 })(typeof self !== 'undefined' ? self : this, () => {
   'use strict';
 
@@ -45,7 +45,7 @@
   // de Google del momento (para su «actualizado hace…»).
   const freezeInbox = (google) => ({ inbox: google?.data?.inbox || [], feed: google || null });
 
-  // Con datos nuevos: se reemplaza si los trajo una escritura de JARVIS (un hilo borrado no puede seguir
+  // Con datos nuevos: se reemplaza si los trajo una escritura de ALTER (un hilo borrado no puede seguir
   // siendo «el segundo») o si al congelar todavía no había datos (si no, Mail quedaría vacía hasta salir).
   function nextFrozen(frozen, google, reason) {
     if (reason === 'write' || (!frozen?.feed?.data && google?.data)) return freezeInbox(google);

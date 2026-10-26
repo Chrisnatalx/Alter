@@ -39,7 +39,7 @@ test('groupWeek acepta un día completo con hora y offset', () => {
   assert.equal(days[1].events[0].time, '');
 });
 
-test('buildRefreshOptions: solo lectura, sin JARVIS ni subagentes', () => {
+test('buildRefreshOptions: solo lectura, sin ALTER ni subagentes', () => {
   const o = buildRefreshOptions({ config });
   assert.deepEqual(o.tools, []);
   assert.deepEqual(o.allowedTools, READ_TOOLS);
@@ -47,7 +47,7 @@ test('buildRefreshOptions: solo lectura, sin JARVIS ni subagentes', () => {
   assert.equal(o.persistSession, false);
   assert.equal(o.outputFormat.type, 'json_schema');
   assert.equal(o.model, config.feedModel);
-  assert.ok(!o.systemPrompt.includes('JARVIS'));
+  assert.ok(!o.systemPrompt.includes('ALTER'));
   assert.equal(o.agents, undefined);
   assert.equal(o.mcpServers, undefined);
 });

@@ -10,7 +10,7 @@ test('needsConfirm: acciones que envían o borran piden confirmación', () => {
 });
 
 test('needsConfirm: lectura, borradores y herramientas propias no', () => {
-  for (const t of ['mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Google_Calendar__list_events', 'WebSearch', 'mcp__jarvis__abrir_en_navegador']) {
+  for (const t of ['mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Google_Calendar__list_events', 'WebSearch', 'mcp__alter__abrir_en_navegador']) {
     assert.equal(needsConfirm(t, {}), false, t);
   }
 });

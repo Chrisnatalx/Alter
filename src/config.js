@@ -1,4 +1,4 @@
-// Configuración de JARVIS, leída del entorno (.env). Los datos personales (nombre, zona
+// Configuración de ALTER, leída del entorno (.env). Los datos personales (nombre, zona
 // horaria, cuenta de Google) viven solo en .env, nunca en el código.
 
 require('../env');
@@ -32,29 +32,29 @@ function resolveTimezone(value) {
   const system = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (!value) return system;
   try { new Intl.DateTimeFormat('es', { timeZone: value }); return value; } catch {
-    console.warn(`  [AVISO] JARVIS_TIMEZONE="${value}" no es una zona horaria válida (ejemplo: America/Argentina/Buenos_Aires). Uso la del sistema: ${system}.`);
+    console.warn(`  [AVISO] ALTER_TIMEZONE="${value}" no es una zona horaria válida (ejemplo: America/Argentina/Buenos_Aires). Uso la del sistema: ${system}.`);
     return system;
   }
 }
 
 module.exports = Object.freeze({
-  port: Number(process.env.JARVIS_PORT || 7777),
-  model: process.env.JARVIS_MODEL || '', // vacío = modelo por defecto de tu cuenta
+  port: Number(process.env.ALTER_PORT || 7777),
+  model: process.env.ALTER_MODEL || '', // vacío = modelo por defecto de tu cuenta
   // Cuenta de Google con la que abrir Calendar, Gmail, Drive… si hay varias en el navegador.
-  googleAccount: process.env.JARVIS_GOOGLE_ACCOUNT || '',
-  userName: process.env.JARVIS_USER_NAME || '',
-  timezone: resolveTimezone(process.env.JARVIS_TIMEZONE),
+  googleAccount: process.env.ALTER_GOOGLE_ACCOUNT || '',
+  userName: process.env.ALTER_USER_NAME || '',
+  timezone: resolveTimezone(process.env.ALTER_TIMEZONE),
   claudeBin: resolveClaudeBin(),
   confirmTimeoutMs: 2 * 60 * 1000, // sin respuesta en 2 minutos → se deniega
-  // Solo los conectores que JARVIS conserva (Gmail, Calendar, Drive, GitHub y Discord); '0' carga todos los de la cuenta
-  mcpFilter: !isOff(process.env.JARVIS_MCP_FILTER),
+  // Solo los conectores que ALTER conserva (Gmail, Calendar, Drive, GitHub y Discord); '0' carga todos los de la cuenta
+  mcpFilter: !isOff(process.env.ALTER_MCP_FILTER),
   claudeHome: os.homedir(), // de acá se leen (solo lectura) los plugins instalados para el filtro
   // Una frase corta antes de cada herramienta, para que la voz arranque antes; '0' lo apaga
-  promptPreamble: !isOff(process.env.JARVIS_PROMPT_PREAMBLE),
+  promptPreamble: !isOff(process.env.ALTER_PROMPT_PREAMBLE),
   // Registro local de tiempos por turno (JSONL); '0' lo apaga
-  timingLog: process.env.JARVIS_TIMING_LOG === '0' ? '' : (process.env.JARVIS_TIMING_LOG || path.join(ROOT, 'logs', 'tiempos.jsonl')),
+  timingLog: process.env.ALTER_TIMING_LOG === '0' ? '' : (process.env.ALTER_TIMING_LOG || path.join(ROOT, 'logs', 'tiempos.jsonl')),
   // Refresco en segundo plano de Calendar y Gmail para las vistas (src/feeds/): query aparte, solo lectura
-  feedModel: process.env.JARVIS_FEED_MODEL || 'haiku',
+  feedModel: process.env.ALTER_FEED_MODEL || 'haiku',
   feedTimeoutMs: 120000,
   inboxSize: 8, // hilos de la bandeja que entran en la cara de Mail
   feedIntervalMs: 10 * 60 * 1000, // cada 10 minutos, solo con la página abierta

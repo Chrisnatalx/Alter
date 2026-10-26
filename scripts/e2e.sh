@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prueba de punta a punta de JARVIS (subagentes y tareas en segundo plano), en Git Bash.
+# Prueba de punta a punta de ALTER (subagentes y tareas en segundo plano), en Git Bash.
 # Levanta el servidor en el puerto 7788, escucha /api/events y manda tres mensajes por POST.
 # Seguridad: toda confirmación se rechaza (allow:false); nunca se acepta ninguna.
 # Salida: eventos sin deltas, texto armado por caso y tiempos. Log del servidor en $OUT/server.log.
@@ -20,23 +20,23 @@ PIDS=()
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; }
 trap cleanup EXIT
 
-JARVIS_PORT=$PORT node server.js > "$SERVER_LOG" 2>&1 &
+ALTER_PORT=$PORT node server.js > "$SERVER_LOG" 2>&1 &
 PIDS+=($!)
 
 # Espera a que el servidor responda y saca el token de la página
 TOKEN=""
 for _ in $(seq 1 50); do
-  TOKEN=$(curl -s "$BASE/" | sed -n 's/.*name="jarvis-token" content="\([^"]*\)".*/\1/p')
+  TOKEN=$(curl -s "$BASE/" | sed -n 's/.*name="alter-token" content="\([^"]*\)".*/\1/p')
   [ -n "$TOKEN" ] && break
   sleep 0.2
 done
 [ -n "$TOKEN" ] || { echo "No arrancó el servidor"; cat "$SERVER_LOG"; exit 1; }
 
-curl -s -N -H "x-jarvis-token: $TOKEN" "$BASE/api/events" >> "$EVENTS" &
+curl -s -N -H "x-alter-token: $TOKEN" "$BASE/api/events" >> "$EVENTS" &
 PIDS+=($!)
 
 post() { # post RUTA JSON
-  curl -s -o /dev/null -w '%{http_code}' -X POST -H "x-jarvis-token: $TOKEN" \
+  curl -s -o /dev/null -w '%{http_code}' -X POST -H "x-alter-token: $TOKEN" \
     -H 'Content-Type: application/json' -d "$2" "$BASE/api/$1"
 }
 

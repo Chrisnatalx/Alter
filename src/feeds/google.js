@@ -1,6 +1,6 @@
 // Calendar y Gmail para las vistas del carrusel. Los conectores de claude.ai solo se alcanzan desde una
 // sesión del Agent SDK, así que el refresco es una query aparte de la conversación: con haiku, sin el
-// prompt de JARVIS, con solo tres herramientas de lectura y salida JSON validada. No usa agent-options.js:
+// prompt de ALTER, con solo tres herramientas de lectura y salida JSON validada. No usa agent-options.js:
 // arma sus propias opciones mínimas. Es de solo lectura a prueba de fallas: si ve cualquier otra herramienta, no corre.
 
 const { z } = require('zod');

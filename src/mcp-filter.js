@@ -1,4 +1,4 @@
-// Filtro de servidores MCP (JARVIS_MCP_FILTER): JARVIS carga solo los conectores que la persona eligió
+// Filtro de servidores MCP (ALTER_MCP_FILTER): ALTER carga solo los conectores que la persona eligió
 // conservar (Gmail, Google Calendar, Google Drive, GitHub y el plugin de Discord) más su servidor propio, en
 // vez de todos los de la cuenta. Así cada turno lleva muchas menos herramientas.
 //
@@ -7,7 +7,7 @@
 // - Si hay alguna entrada `serverUrl`, todo servidor remoto se compara por URL (los http de la persona que no
 //   están en la lista quedan afuera); si hay alguna `serverCommand`, todo servidor stdio se compara por su
 //   comando exacto, sin comodines ni ${VAR}. Por eso el comando de Discord se arma con su carpeta instalada.
-// - El servidor propio `jarvis` (tipo sdk) pasa siempre, sin estar en la lista.
+// - El servidor propio `alter` (tipo sdk) pasa siempre, sin estar en la lista.
 // Solo se lee configuración (~/.claude/plugins): nada se escribe.
 
 const fs = require('fs');
@@ -25,7 +25,7 @@ const KEPT_PLUGIN_SERVERS = [{ plugin: 'discord', server: 'discord' }];
 const OFFICIAL_MARKETPLACE = 'claude-plugins-official';
 // Nombres que informa init.mcp_servers, para avisar si falta alguno
 const KEPT_MCP_SERVERS = ['claude.ai Gmail', 'claude.ai Google Calendar', 'claude.ai Google Drive', 'claude.ai GitHub', 'plugin:discord:discord'];
-const OWN_MCP_SERVERS = ['jarvis'];
+const OWN_MCP_SERVERS = ['alter'];
 
 // La instalación de un plugin: primero la del marketplace oficial; entre sus instalaciones, las globales
 // (scope user) antes que las de un proyecto, y de esas la actualizada más recientemente.

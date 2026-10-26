@@ -3,7 +3,7 @@
 
 // Los cuatro pedidos típicos del spec: saludo, agenda, correo y una búsqueda web
 const REQUESTS = [
-  { id: 'saludo', text: 'Hola JARVIS, ¿cómo andás?' },
+  { id: 'saludo', text: 'Hola ALTER, ¿cómo andás?' },
   { id: 'agenda', text: '¿Qué tengo hoy en el calendario?' },
   { id: 'correo', text: 'Leé mi último mail.' },
   { id: 'web', text: 'Buscá en la web el pronóstico del tiempo para mañana en Buenos Aires.' },
@@ -70,7 +70,7 @@ function createSseParser(onEvent) {
 function checkEnv(env) {
   if (!env.MEDIR_CONFIG) return 'Falta MEDIR_CONFIG (una etiqueta para esta configuración, p. ej. base).';
   if (!/^[\w-]+$/.test(env.MEDIR_CONFIG)) return 'MEDIR_CONFIG solo puede tener letras, números, - y _ (va en el nombre del archivo).';
-  if (!env.JARVIS_MODEL) return 'Falta JARVIS_MODEL: en cada comparación el modelo se fija de forma explícita.';
+  if (!env.ALTER_MODEL) return 'Falta ALTER_MODEL: en cada comparación el modelo se fija de forma explícita.';
   return null;
 }
 

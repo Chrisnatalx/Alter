@@ -40,7 +40,7 @@ test('buildMcpFilterSettings: URLs de los cuatro conectores y el comando de Disc
   const s = buildMcpFilterSettings({ home: HOME, readFile: fakeFs() });
   assert.deepEqual(s.allowedMcpServers.filter((e) => e.serverUrl).map((e) => e.serverUrl), KEPT_CONNECTOR_URLS);
   assert.equal(s.allowedMcpServers.filter((e) => e.serverCommand).length, 1);
-  assert.ok(s.allowedMcpServers.every((e) => !e.serverName)); // jarvis es del SDK: pasa sin estar en la lista
+  assert.ok(s.allowedMcpServers.every((e) => !e.serverName)); // alter es del SDK: pasa sin estar en la lista
 });
 
 test('pluginServerCommands prefiere el marketplace oficial y la instalación más nueva', () => {
@@ -66,14 +66,14 @@ test('keptConnectorsSettled: deja de esperar cuando nada está pendiente aunque 
     { name: 'claude.ai Gmail', status: 'connected', source: 'claudeai' },
     { name: 'claude.ai Google Calendar', status: 'connected', source: 'claudeai' },
     { name: 'claude.ai Google Drive', status: 'connected', source: 'claudeai' },
-    { name: 'jarvis', status: 'connected', source: 'sdk' },
+    { name: 'alter', status: 'connected', source: 'sdk' },
     ...over,
   ];
   assert.equal(keptConnectorsSettled(st([])), true); // falta GitHub pero nada espera: no se aguanta el tope
   assert.equal(keptConnectorsSettled(st([{ name: 'claude.ai GitHub', status: 'pending', source: 'claudeai' }])), false);
   assert.equal(keptConnectorsSettled(st([{ name: 'plugin:discord:discord', status: 'pending', source: 'plugin' }])), false);
   // antes de que llegue la lista de claude.ai no se da por terminado (si no, el primer turno sale sin sus herramientas)
-  assert.equal(keptConnectorsSettled([{ name: 'jarvis', status: 'connected', source: 'sdk' }]), false);
+  assert.equal(keptConnectorsSettled([{ name: 'alter', status: 'connected', source: 'sdk' }]), false);
   assert.equal(keptConnectorsSettled([]), false);
 });
 
@@ -81,10 +81,10 @@ test('missingKeptServers detecta conservados ausentes o no conectados', () => {
   const missing = missingKeptServers([
     { name: 'claude.ai Gmail', status: 'connected' },
     { name: 'claude.ai Google Drive', status: 'needs-auth' },
-    { name: 'jarvis', status: 'connected' },
+    { name: 'alter', status: 'connected' },
   ]);
   for (const n of ['claude.ai Google Drive', 'claude.ai Google Calendar', 'claude.ai GitHub', 'plugin:discord:discord']) assert.ok(missing.includes(n), n);
-  assert.ok(!missing.includes('jarvis'));
+  assert.ok(!missing.includes('alter'));
   assert.ok(!missing.includes('claude.ai Gmail'));
   assert.equal(missingKeptServers(undefined).length, KEPT_MCP_SERVERS.length + 1);
 });

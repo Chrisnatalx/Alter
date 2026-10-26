@@ -1,4 +1,4 @@
-// J.A.R.V.I.S. — lógica del cliente.
+// ALTER — lógica del cliente.
 // Estados: boot → idle ⇄ listening → thinking → speaking → idle.
 // Voz de entrada: Web Speech API (SpeechRecognition). Voz de salida: speechSynthesis.
 // El texto de Claude llega por el canal de eventos permanente (SSE en /api/events) y se va leyendo por oraciones;
@@ -9,16 +9,17 @@
 
   const $ = (id) => document.getElementById(id);
   const store = {
-    get(k, d) { try { const v = localStorage.getItem('jarvis.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem('jarvis.' + k, JSON.stringify(v)); } catch { /* sin storage */ } },
+    // Lo guardado antes del cambio de nombre (claves `jarvis.`) se sigue leyendo hasta que se vuelva a guardar
+    get(k, d) { try { const v = localStorage.getItem('alter.' + k) ?? localStorage.getItem('jarvis.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('alter.' + k, JSON.stringify(v)); } catch { /* sin storage */ } },
   };
 
   const STATE_LABEL = { boot: 'INICIANDO', idle: 'EN ESPERA', listening: 'ESCUCHANDO', thinking: 'PROCESANDO', speaking: 'TRANSMITIENDO', confirming: 'AUTORIZACIÓN' };
   // Token que el servidor inyecta en la página; sin él la API rechaza los pedidos.
-  const TOKEN = document.querySelector('meta[name="jarvis-token"]')?.content || '';
+  const TOKEN = document.querySelector('meta[name="alter-token"]')?.content || '';
   // El servidor reemplaza el marcador por el nombre; si no lo hizo (o está vacío), saluda sin nombre
-  const USER_RAW = document.querySelector('meta[name="jarvis-user"]')?.content || '';
-  const USER = USER_RAW === '__JARVIS_USER__' ? '' : USER_RAW;
+  const USER_RAW = document.querySelector('meta[name="alter-user"]')?.content || '';
+  const USER = USER_RAW === '__ALTER_USER__' ? '' : USER_RAW;
 
   const app = {
     state: 'boot',
@@ -38,7 +39,7 @@
     app.state = s;
     document.body.dataset.state = s;
     $('state-label').textContent = STATE_LABEL[s] || s.toUpperCase();
-    // Si una tarea terminó mientras JARVIS estaba ocupado, su resultado se dice ahora que queda libre
+    // Si una tarea terminó mientras ALTER estaba ocupado, su resultado se dice ahora que queda libre
     if (s === 'idle' && taskQueue.length) {
       setTimeout(() => { if (taskQueue.length && canSayTask()) sayTaskTurn(taskQueue.shift()); }, 0);
     }
@@ -304,7 +305,7 @@
   function addLog(who, text) {
     const li = document.createElement('li');
     li.className = who;
-    const label = who === 'user' ? 'VOS' : who === 'sys' ? 'SISTEMA' : 'J.A.R.V.I.S.';
+    const label = who === 'user' ? 'VOS' : who === 'sys' ? 'SISTEMA' : 'ALTER';
     li.innerHTML = `<b>${label} · ${new Date().toLocaleTimeString('es-AR', { hour12: false })}</b>`;
     const span = document.createElement('span');
     span.textContent = text;
@@ -339,18 +340,22 @@
 
   const post = (url, body = {}) => fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Jarvis-Token': TOKEN },
+    headers: { 'Content-Type': 'application/json', 'X-Alter-Token': TOKEN },
     body: JSON.stringify(body),
   });
 
+  // La sesión arranca apenas se abre la página (o se reinicia la memoria): el arranque (~4–5 s) no cae en el
+  // primer mensaje. No le manda nada al modelo; si falla, el primer mensaje lo vuelve a intentar.
+  const warmSession = () => post('/api/warm', { sessionId: app.sessionId }).catch(() => {});
+
   // Tiempos de voz del turno (lógica en timing.js): se reportan una vez, cuando están completos
   function reportIfReady(turn) {
-    if (!turn || turn.reported || !window.JarvisTiming.isReportReady(turn)) return;
+    if (!turn || turn.reported || !window.AlterTiming.isReportReady(turn)) return;
     turn.reported = true;
-    const report = window.JarvisTiming.buildVoiceReport(turn.marks, turn.server);
+    const report = window.AlterTiming.buildVoiceReport(turn.marks, turn.server);
     const ms = report.speechEndToSpeechStartMs ?? report.postToSpeechStartMs; // un mensaje escrito no tiene fin del habla
     $('t-voice').textContent = ms == null ? '— ms' : ms + ' ms';
-    $('t-voice').title = window.JarvisTiming.formatBreakdown(report);
+    $('t-voice').title = window.AlterTiming.formatBreakdown(report);
     post('/api/timing', report).catch(() => {});
   }
 
@@ -362,7 +367,7 @@
   let activeTurn = false;  // hay un turno en curso en el servidor (desde su `turn` hasta su `done`/`error`)
   let staleTurn = false;   // solo el turno que estaba activo al interrumpir: se ignora hasta que termine
   let taskBuffer = '';     // texto de un turno de tarea: se acumula y se dice entero al terminar
-  const taskQueue = [];    // resultados de tareas esperando a que JARVIS esté libre
+  const taskQueue = [];    // resultados de tareas esperando a que ALTER esté libre
 
   // Un turno de tarea terminó con una pregunta de la persona aún abierta y no llegó el turno de esa pregunta
   // (se absorbió en el de la tarea): pasados unos segundos se da por cerrada para que no quede en PROCESANDO.
@@ -397,7 +402,7 @@
     $('sub-user').textContent = text;
     $('sub-ai').textContent = '';
     addLog('user', text);
-    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: { ...window.JarvisTiming.emptyMarks(), ...inputMarks } };
+    const turn = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: { ...window.AlterTiming.emptyMarks(), ...inputMarks } };
     userBusy = true;
     setState('thinking');
     $('t-link').textContent = 'TRANSMITIENDO';
@@ -410,7 +415,7 @@
       if (stale) await stale; // que el corte llegue al servidor antes que el mensaje nuevo
       if (seq !== askSeq) return; // ESC o una pregunta nueva mientras esperaba el corte: este mensaje ya no se manda
       cur = turn; // recién ahora: lo que llegue del turno cortado no se pinta como respuesta nueva
-      // Con una vista abierta, JARVIS sabe qué mira la persona («el segundo» es el segundo de la lista visible)
+      // Con una vista abierta, ALTER sabe qué mira la persona («el segundo» es el segundo de la lista visible)
       const view = viewPayload(app.face, { shownInbox: frozen.inbox, week: feedCache.google?.data?.week });
       turn.marks.post = performance.now();
       const res = await post('/api/message', { text: greetContext + text, sessionId: app.sessionId, ...(view ? { view } : {}) });
@@ -521,7 +526,7 @@
           dropRec();
           spoken = new Set();
           $('sub-ai').textContent = '';
-          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: window.JarvisTiming.emptyMarks() };
+          cur = { aiSpan: addLog('ai', '…'), full: '', speakBuf: '', t0: performance.now(), firstToken: true, marks: window.AlterTiming.emptyMarks() };
           userBusy = true; streamDone = false;
           setState('thinking');
           $('t-link').textContent = 'TRANSMITIENDO';
@@ -622,6 +627,7 @@
         cur = null; userBusy = false; streamDone = true; taskBuffer = ''; taskQueue.length = 0; activeTurn = false; staleTurn = false;
         closeConfirm(); stopSpeaking(); taskRows.clear(); $('tasks').innerHTML = '';
         app.sessionId = null; app.turns = 0; store.set('sessionId', null); updateTelemetry();
+        warmSession();
         $('log').innerHTML = ''; $('sub-user').textContent = ''; $('sub-ai').textContent = 'Memoria de conversación reiniciada.';
         // Habla en estado "speaking" para que, al terminar, vuelva a espera y reabra el micrófono como siempre
         setState('speaking');
@@ -655,7 +661,7 @@
     let fails = 0;
     while (!app.replaced) {
       try {
-        const res = await fetch('/api/events', { headers: { 'X-Jarvis-Token': TOKEN } });
+        const res = await fetch('/api/events', { headers: { 'X-Alter-Token': TOKEN } });
         if (res.status === 403) {
           const msg = 'El servidor se reinició: recargá la página con F5.';
           $('sub-ai').textContent = msg; addLog('sys', msg); $('t-link').textContent = 'FALLA';
@@ -665,6 +671,7 @@
         fails = 0;
         $('t-link').textContent = 'ESTABLE';
         loadFeeds(); // lo que ya tiene el servidor; lo nuevo llega por el evento `feeds`
+        warmSession();
         await readEvents(res);
       } catch (err) {
         console.warn('Canal de eventos:', err.message);
@@ -789,7 +796,7 @@
     if (!SR) { $('sub-ai').textContent = 'Este navegador no soporta reconocimiento de voz. Usá Chrome o Edge, o escribí abajo.'; return; }
     if (app.state === 'listening') return;
     stopBargeIn();
-    interrupt(true); // hablar encima de JARVIS lo interrumpe
+    interrupt(true); // hablar encima de ALTER lo interrumpe
     ensureMicMeter();
     heard = ''; lastResultAt = null;
     rec = new SR();
@@ -832,12 +839,12 @@
   }
 
   // ------------------------------------------------------------
-  //  Interrumpir hablando: escucha mientras JARVIS habla. El micrófono también capta los
-  //  parlantes, así que se ignoran las palabras que JARVIS dijo en este turno; corta solo
+  //  Interrumpir hablando: escucha mientras ALTER habla. El micrófono también capta los
+  //  parlantes, así que se ignoran las palabras que ALTER dijo en este turno; corta solo
   //  si oye varias palabras nuevas o una orden de corte.
   // ------------------------------------------------------------
   let spoken = new Set();
-  const STOP_WORDS = ['basta', 'callate', 'para', 'espera', 'stop', 'alto', 'silencio', 'jarvis'];
+  const STOP_WORDS = ['basta', 'callate', 'para', 'espera', 'stop', 'alto', 'silencio', 'alter'];
   const BARGE_MIN_WORDS = 3;
   function words(s) {
     return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
@@ -924,7 +931,7 @@
     if (app.micOn) setTimeout(() => { if (app.state === 'idle') startListening(); }, 300); // si habló una tarea, no se la corta
   });
 
-  // Tocar el núcleo mientras JARVIS habla lo interrumpe y vuelve a escucharte.
+  // Tocar el núcleo mientras ALTER habla lo interrumpe y vuelve a escucharte.
   $('core-btn').addEventListener('click', () => {
     if (app.state === 'speaking' || app.state === 'thinking') {
       interrupt(); setState('idle');
@@ -992,7 +999,7 @@
   // ============================================================
   //  CÁMARA Y GESTOS (hands.js entrega la mano; gestures.js la convierte en eventos)
   // ============================================================
-  const tracker = window.JarvisGestures?.createGestureTracker();
+  const tracker = window.AlterGestures?.createGestureTracker();
   const cam = { status: 'off', detail: '', hand: false };
 
   function setHandState() {
@@ -1009,12 +1016,12 @@
   }
 
   function startCam() {
-    if (!window.JarvisHands || !tracker || app.replaced) { if (!window.JarvisHands) { cam.status = 'error'; cam.detail = 'sin módulo de manos'; setHandState(); } return; }
-    JarvisHands.start({
+    if (!window.AlterHands || !tracker || app.replaced) { if (!window.AlterHands) { cam.status = 'error'; cam.detail = 'sin módulo de manos'; setHandState(); } return; }
+    AlterHands.start({
       onFrame: (t, hand) => {
-        if (DEBUG) cam.x = hand ? JarvisGestures.palmCenter(hand).x : null;
+        if (DEBUG) cam.x = hand ? AlterGestures.palmCenter(hand).x : null;
         // Con ?debug, cada cuadro y cada evento del rastreador van a la consola (para ajustar los umbrales)
-        if (DEBUG) console.log(`[cuadro] t=${Math.round(t)} ${hand ? `x=${cam.x.toFixed(2)} y=${JarvisGestures.palmCenter(hand).y.toFixed(2)} pellizco=${JarvisGestures.isPinchPose(hand)}` : 'SIN MANO'}`);
+        if (DEBUG) console.log(`[cuadro] t=${Math.round(t)} ${hand ? `x=${cam.x.toFixed(2)} y=${AlterGestures.palmCenter(hand).y.toFixed(2)} pellizco=${AlterGestures.isPinchPose(hand)}` : 'SIN MANO'}`);
         for (const ev of tracker.update({ t, hand })) { if (DEBUG) console.log('[gesto]', JSON.stringify(ev)); onGesture(ev); }
       },
       onStatus: (status, detail) => {
@@ -1030,7 +1037,7 @@
   }
 
   function stopCam() {
-    window.JarvisHands?.stop();
+    window.AlterHands?.stop();
     tracker?.reset();
     onGesture({ type: 'release' }); // lo que estuviera agarrado vuelve a su lugar
     cam.status = 'off'; cam.hand = false;
@@ -1071,7 +1078,7 @@
   if (DEBUG) {
     setInterval(() => {
       if (cam.status !== 'on') return;
-      const s = JarvisHands.takeStats();
+      const s = AlterHands.takeStats();
       console.log(`[cam] detectForVideo ${s.avgMs.toFixed(1)} ms promedio · ${s.frames} cuadros en 5 s`);
     }, 5000);
     setInterval(() => { if (cam.status === 'on' && cam.x != null) console.log(`[cam] palma x=${cam.x.toFixed(2)}`); }, 500);
@@ -1080,8 +1087,8 @@
   // ============================================================
   //  CARRUSEL DE VISTAS (Calendar, Mail y Clima; los datos ya están guardados en el servidor)
   // ============================================================
-  const { RING, navigate, viewPayload, freezeInbox, nextFrozen } = window.JarvisNav;
-  const Faces = window.JarvisFaces;
+  const { RING, navigate, viewPayload, freezeInbox, nextFrozen } = window.AlterNav;
+  const Faces = window.AlterFaces;
   app.nav = { face: 'core', from: 'core' };
   let ringTurn = 0;           // vueltas acumuladas: de Mail al Núcleo sigue girando para el mismo lado
   let feedCache = {};         // el último snapshot de /api/feeds: { google, weather }
@@ -1120,7 +1127,7 @@
     renderMail();
   }
 
-  // Llegaron datos nuevos. La lista de Mail abierta se actualiza si los trajo una escritura de JARVIS
+  // Llegaron datos nuevos. La lista de Mail abierta se actualiza si los trajo una escritura de ALTER
   // (un hilo que ya no está no puede seguir siendo «el segundo») o si se congeló sin datos (nextFrozen).
   function applyFeeds(snap) {
     feedCache = snap || {};
@@ -1130,7 +1137,7 @@
 
   async function loadFeeds() {
     try {
-      const res = await fetch('/api/feeds', { headers: { 'X-Jarvis-Token': TOKEN } });
+      const res = await fetch('/api/feeds', { headers: { 'X-Alter-Token': TOKEN } });
       if (res.ok) applyFeeds(await res.json());
     } catch (e) { console.warn('No pude traer los datos de las vistas:', e); }
   }

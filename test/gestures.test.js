@@ -32,6 +32,8 @@ function feed(tracker, frames) {
   for (const [t, hand] of frames) for (const ev of tracker.update({ t, hand })) out.push({ ...ev, t });
   return out;
 }
+// Cuadros sin mano cada 33 ms desde t0 hasta pasar la tolerancia (lostGraceMs) contada desde lastSeen
+const gone = (t0, lastSeen) => { const f = []; for (let t = t0; t <= lastSeen + DEFAULTS.lostGraceMs + 66; t += 33) f.push([t, null]); return f; };
 // Mano quieta en (x, y) entre t0 y t1
 function hold(t0, t1, x, y, opts) {
   const f = [];
@@ -100,6 +102,43 @@ test('diagonal does not swipe', () => {
   assert.deepEqual(swipes(evs), []);
 });
 
+// Caso real (registro de la persona, ~12 cuadros por segundo): la mano quieta cerca del borde izquierdo
+// arranca el giro hacia ese lado y sale del cuadro antes de recorrer swipeMinDx. Igual es un giro.
+test('a fast swipe that leaves the frame still counts', () => {
+  const real = [[40664, 0.11], [40737, 0.13], [40813, 0.15], [40908, 0.17], [41010, 0.18], [41108, 0.18], [41178, 0.18],
+    [41247, 0.18], [45160, 0.20], [45236, 0.20], [45326, 0.20], [45431, 0.19], [45507, 0.18], [45604, 0.13], [45674, 0.07]];
+  const frames = real.map(([t, x]) => [t, handAt(x, 0.45)]);
+  const evs = feed(createGestureTracker(), [...frames, ...gone(45755, 45674)]);
+  assert.deepEqual(swipes(evs).map((e) => e.dir), ['left']);
+  // Lo mismo por el borde derecho
+  const mirrored = real.map(([t, x]) => [t, handAt(1 - x, 0.45)]);
+  const evsR = feed(createGestureTracker(), [...mirrored, ...gone(45755, 45674)]);
+  assert.deepEqual(swipes(evsR).map((e) => e.dir), ['right']);
+});
+
+// Caso real (video de la persona): en el giro brusco la mano se desenfoca y MediaPipe la pierde 2 o 3
+// cuadros justo a mitad del recorrido. Recorre ~0.3 del cuadro en ~0.4 s.
+test('a swipe with the hand lost mid-stroke still counts', () => {
+  const real = [[0, 0.26], [67, 0.24], [133, 0.22], [200, 0.22], [267, 0.23], [333, 0.26], [400, null], [467, null],
+    [533, 0.54], [600, 0.56], [667, 0.57], [733, 0.56], [800, 0.55], [867, 0.54]];
+  const evs = feed(createGestureTracker(), real.map(([t, x]) => [t, x == null ? null : handAt(x, 0.5)]));
+  assert.deepEqual(swipes(evs).map((e) => e.dir), ['right']);
+  // Un hueco corto no avisa que se fue la mano
+  assert.deepEqual(evs.filter((e) => e.type === 'hand').map((e) => e.present), [true]);
+});
+
+test('leaving the frame slowly, or downwards, is not a swipe', () => {
+  // Se va despacio por el borde: 0.2 → 0.05 en 1,5 s
+  const slow = feed(createGestureTracker(), [...hold(0, 250, 0.2, 0.5), ...move(283, 1500, [0.2, 0.5], [0.05, 0.5]), ...gone(1850, 1783)]);
+  assert.deepEqual(swipes(slow), []);
+  // Baja el brazo: sale rápido por abajo (no cuenta como giro hacia abajo)
+  const drop = feed(createGestureTracker(), [...hold(0, 250, 0.5, 0.8), ...move(283, 150, [0.5, 0.8], [0.5, 0.95]), ...gone(500, 433)]);
+  assert.deepEqual(swipes(drop), []);
+  // Un movimiento rápido en el medio del cuadro que después pierde la mano (no salió por un borde)
+  const mid = feed(createGestureTracker(), [...hold(0, 250, 0.6, 0.5), ...move(283, 100, [0.6, 0.5], [0.45, 0.5]), ...gone(450, 383)]);
+  assert.deepEqual(swipes(mid), []);
+});
+
 test('cooldown blocks a second swipe', () => {
   // Ida hacia la izquierda y vuelta hacia la derecha, con `gap` ms de mano quieta entre los dos
   const twoSwipes = (gap) => {
@@ -111,7 +150,30 @@ test('cooldown blocks a second swipe', () => {
     ]);
   };
   assert.deepEqual(swipes(twoSwipes(400)).map((e) => e.dir), ['left']);
-  assert.deepEqual(swipes(twoSwipes(900)).map((e) => e.dir), ['left', 'right']);
+  // La vuelta de la mano a donde arrancó no deshace el giro: el lado contrario espera reverseMs
+  assert.deepEqual(swipes(twoSwipes(900)).map((e) => e.dir), ['left']);
+  assert.deepEqual(swipes(twoSwipes(DEFAULTS.reverseMs + 100)).map((e) => e.dir), ['left', 'right']);
+});
+
+// Caso real (video de la persona, coordenadas de la persona): giro a la derecha que pierde la mano a mitad
+// de camino, y ~1 s después la mano vuelve rápido a donde arrancó. Solo cuenta el giro.
+test('the hand going back after a swipe does not undo it', () => {
+  const real = [[8730, 0.22], [8800, 0.21], [8870, 0.22], [8930, 0.26], [9000, null], [9070, null], [9130, null],
+    [9200, 0.60], [9270, 0.57], [9330, 0.57], [9400, 0.56], [9470, 0.56], [9530, 0.55], [9600, 0.54], [9670, 0.54],
+    [9730, 0.53], [9800, 0.52], [9870, 0.51], [9930, 0.50], [10000, 0.47], [10070, 0.41], [10130, 0.34], [10200, 0.23],
+    [10270, 0.22], [10330, 0.20], [10400, 0.19]];
+  const evs = feed(createGestureTracker(), [...hold(8400, 8700, 0.22, 0.6), ...real.map(([t, x]) => [t, x == null ? null : handAt(x, 0.6)])]);
+  assert.deepEqual(swipes(evs).map((e) => e.dir), ['right']);
+});
+
+test('a second swipe the same way only waits the cooldown', () => {
+  const t1 = 283 + 250, t2 = t1 + 900;
+  const evs = feed(createGestureTracker(), [
+    ...hold(0, 250, 0.8, 0.5), ...move(283, 250, [0.8, 0.5], [0.35, 0.5]), ...hold(t1 + 33, t1 + 400, 0.35, 0.5),
+    ...move(t1 + 433, 300, [0.35, 0.5], [0.8, 0.5]), ...hold(t1 + 766, t2 - 33, 0.8, 0.5), // vuelve en el enfriamiento
+    ...move(t2, 250, [0.8, 0.5], [0.35, 0.5]), ...hold(t2 + 283, t2 + 1000, 0.35, 0.5),
+  ]);
+  assert.deepEqual(swipes(evs).map((e) => e.dir), ['left', 'left']);
 });
 
 // La mano en pose de pellizco (ratio 0.8) hasta quedar estable: el pellizco arranca en t = 231
@@ -170,7 +232,7 @@ test('drag reports offset from grab point', () => {
 test('release on pose exit or hand loss', () => {
   const a = feed(createGestureTracker(), [...steady(), [T0, handAt(0.5, 0.5)]]);
   assert.deepEqual(a.filter((e) => e.type === 'release').map((e) => e.t), [T0]);
-  const b = feed(createGestureTracker(), [...steady(), [T0, null], [T0 + 33, null], [T0 + 66, null], [T0 + 99, null], [T0 + 133, null]]);
+  const b = feed(createGestureTracker(), [...steady(), ...gone(T0, 231)]);
   assert.equal(b.filter((e) => e.type === 'release').length, 1);
   assert.ok(b.find((e) => e.type === 'release').t > 231 + DEFAULTS.lostGraceMs);
   // Un cuadro perdido suelto no suelta nada
@@ -205,8 +267,8 @@ test('al soltar el pellizco el movimiento previo no cuenta como giro', () => {
 
 test('perder la mano avisa una vez y reset limpia todo', () => {
   const tr = createGestureTracker();
-  const evs = feed(tr, [...hold(0, 300, 0.5, 0.5), [333, null], [366, null], [400, null], [433, null], [466, null]]);
+  const evs = feed(tr, [...hold(0, 300, 0.5, 0.5), ...gone(333, 297)]);
   assert.deepEqual(evs.filter((e) => e.type === 'hand').map((e) => e.present), [true, false]);
   tr.reset();
-  assert.deepEqual(feed(tr, [[500, null]]), []);
+  assert.deepEqual(feed(tr, [[2000, null]]), []);
 });

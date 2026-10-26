@@ -11,13 +11,16 @@
 
   // Valores iniciales: se ajustan probando frente a la cámara
   const DEFAULTS = Object.freeze({
-    swipeMinDx: 0.35,    // recorrido horizontal mínimo
+    swipeMinDx: 0.25,    // recorrido horizontal mínimo (medido: los giros reales recorren ~0.3 del cuadro)
     swipeMinDy: 0.30,    // recorrido vertical mínimo
     swipeWindowMs: 300,  // ventana de tiempo del gesto
     swipeMaxSlope: 0.5,  // desvío máximo en el otro eje, en proporción al recorrido
     cooldownMs: 800,     // enfriamiento después de un giro
+    reverseMs: 1500,     // …y para el lado contrario: la mano que vuelve a donde arrancó (medido: ~1 s después) no deshace el giro
     stableMs: 200,       // tiempo de mano estable antes de contar movimiento
-    lostGraceMs: 100,    // tolerancia a cuadros sin mano
+    exitMinDx: 0.08,     // giro que sale del cuadro: recorrido mínimo en la ventana antes de perder la mano
+    edgeMargin: 0.12,    // …y la última posición tiene que estar así de cerca del borde por el que salió
+    lostGraceMs: 350,    // tolerancia a cuadros sin mano: en un giro brusco la mano se desenfoca y se pierde 2–4 cuadros
     grabIn: 0.25,        // umbral para agarrar (entrada de la histéresis)
     grabOut: 0.35,       // umbral para soltar (salida de la histéresis)
     zoomMin: 0.6,
@@ -55,14 +58,39 @@
     let stable = false;      // presente sin cortes por stableMs: recién ahí su movimiento cuenta
     let history = [];        // [{ t, x, y }] del centro de la palma, dentro de la ventana
     let cooldownUntil = 0;
+    let last = null;         // { dir, t } del último giro, para no tomar la vuelta de la mano como giro contrario
     let swipeReadyAt = 0;    // desde cuándo cuenta el movimiento para girar (al estabilizarse y después de un pellizco)
     let pinch = null;        // { ratio0, grabbed, grabPoint, zoom }
 
     function reset() {
-      presentSince = null; lastSeen = null; stable = false; history = []; cooldownUntil = 0; swipeReadyAt = 0; pinch = null;
+      presentSince = null; lastSeen = null; stable = false; history = []; cooldownUntil = 0; last = null; swipeReadyAt = 0; pinch = null;
+    }
+
+    const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
+    const isReturn = (dir, t) => last !== null && OPPOSITE[dir] === last.dir && t < last.t + o.reverseMs;
+
+    function emitSwipe(dir, t, events) {
+      events.push({ type: 'swipe', dir });
+      cooldownUntil = t + o.cooldownMs;
+      last = { dir, t };
+    }
+
+    // La mano se perdió en medio de un movimiento rápido hacia un costado, justo en el borde: salió del
+    // cuadro haciendo el gesto (lo normal si arranca cerca del borde). Cuenta como giro. Solo de costado:
+    // bajar el brazo también saca la mano rápido por abajo, y eso no es un gesto.
+    function exitSwipe(events) {
+      if (!stable || pinch || history.length < 2) return;
+      const first = history[0], end = history[history.length - 1];
+      if (end.t < cooldownUntil || end.t < swipeReadyAt) return;
+      const dx = end.x - first.x, dy = end.y - first.y;
+      if (Math.abs(dx) < o.exitMinDx || Math.abs(dy) > o.swipeMaxSlope * Math.abs(dx)) return;
+      if (dx < 0 ? end.x > o.edgeMargin : end.x < 1 - o.edgeMargin) return;
+      const dir = dx < 0 ? 'left' : 'right';
+      if (!isReturn(dir, end.t)) emitSwipe(dir, end.t, events);
     }
 
     function lose(events) {
+      exitSwipe(events);
       if (pinch) { events.push({ type: 'release' }); pinch = null; }
       if (stable) events.push({ type: 'hand', present: false });
       presentSince = null; lastSeen = null; stable = false; history = [];
@@ -106,10 +134,9 @@
       let dir = null;
       if (Math.abs(dx) >= o.swipeMinDx && Math.abs(dy) <= o.swipeMaxSlope * Math.abs(dx)) dir = dx < 0 ? 'left' : 'right';
       else if (Math.abs(dy) >= o.swipeMinDy && Math.abs(dx) <= o.swipeMaxSlope * Math.abs(dy)) dir = dy < 0 ? 'up' : 'down';
-      if (!dir) return;
-      events.push({ type: 'swipe', dir });
+      if (!dir || isReturn(dir, t)) return;
+      emitSwipe(dir, t, events);
       history = [];
-      cooldownUntil = t + o.cooldownMs;
     }
 
     function update({ t, hand }) {

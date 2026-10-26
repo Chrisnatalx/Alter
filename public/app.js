@@ -1013,7 +1013,9 @@
     JarvisHands.start({
       onFrame: (t, hand) => {
         if (DEBUG) cam.x = hand ? JarvisGestures.palmCenter(hand).x : null;
-        for (const ev of tracker.update({ t, hand })) onGesture(ev);
+        // Con ?debug, cada cuadro y cada evento del rastreador van a la consola (para ajustar los umbrales)
+        if (DEBUG) console.log(`[cuadro] t=${Math.round(t)} ${hand ? `x=${cam.x.toFixed(2)} y=${JarvisGestures.palmCenter(hand).y.toFixed(2)} pellizco=${JarvisGestures.isPinchPose(hand)}` : 'SIN MANO'}`);
+        for (const ev of tracker.update({ t, hand })) { if (DEBUG) console.log('[gesto]', JSON.stringify(ev)); onGesture(ev); }
       },
       onStatus: (status, detail) => {
         cam.status = status; cam.detail = detail || '';
